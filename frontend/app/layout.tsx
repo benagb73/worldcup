@@ -27,10 +27,13 @@ function SiteHeader() {
       {/* Host nation flag strip */}
       <div className="h-[3px] w-full bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600" />
 
-      <nav className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3.5">
-        <Link href="/" className="group flex items-center gap-3">
+      <nav className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-3 sm:gap-4 sm:px-4 sm:py-3.5">
+        <Link href="/" className="group flex items-center gap-2 sm:gap-3">
           <TrophyMark />
-          <div className="leading-none">
+          {/* On the smallest viewport we hide the "WORLD CUP / 2026 + flags"
+              block entirely so all four nav links have room. The trophy mark
+              alone still doubles as the home link. */}
+          <div className="hidden leading-none sm:block">
             <div className="font-display text-2xl tracking-wide text-cream group-hover:text-gold transition-colors">
               WORLD CUP
             </div>
@@ -41,7 +44,7 @@ function SiteHeader() {
           </div>
         </Link>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1">
           <NavLink href="/">Groups</NavLink>
           <NavLink href="/bracket">Bracket</NavLink>
           <NavLink href="/leaderboard">Stats</NavLink>
@@ -81,7 +84,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   return (
     <Link
       href={href}
-      className="relative rounded-md px-3 py-2 text-sm font-semibold tracking-wide text-cream/70 transition-colors hover:text-gold hover:bg-white/5"
+      className="relative rounded-md px-2 py-2 text-xs font-semibold tracking-wide text-cream/70 transition-colors hover:text-gold hover:bg-white/5 sm:px-3 sm:text-sm"
     >
       {children}
     </Link>

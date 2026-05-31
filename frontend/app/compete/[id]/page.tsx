@@ -238,15 +238,34 @@ function PickCard({ pick, competitorId, detail, scoring, onSaved }: {
         </span>
       </div>
 
-      {/* Score inputs */}
-      <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <TeamSide team={{ id: pick.home_id, name: pick.home_name, code: pick.home_code, flag: pick.home_flag }} align="right" />
-        <div className="flex items-center justify-center gap-1.5">
-          <NumStepper value={home} onChange={setHome} />
-          <span className="font-display text-2xl text-cream/30">:</span>
-          <NumStepper value={away} onChange={setAway} />
+      {/* Score inputs — stack vertically on mobile so team names + flags get
+          full row width; horizontal 3-column layout from sm+ upward. */}
+      <div className="mt-4">
+        {/* Mobile: teams in a 2-col row on top */}
+        <div className="grid grid-cols-2 gap-3 sm:hidden">
+          <TeamSide team={{ id: pick.home_id, name: pick.home_name, code: pick.home_code, flag: pick.home_flag }} align="left" />
+          <TeamSide team={{ id: pick.away_id, name: pick.away_name, code: pick.away_code, flag: pick.away_flag }} align="right" />
         </div>
-        <TeamSide team={{ id: pick.away_id, name: pick.away_name, code: pick.away_code, flag: pick.away_flag }} align="left" />
+        {/* Mobile: score steppers under the teams */}
+        <div className="mt-3 grid grid-cols-2 items-center gap-3 sm:hidden">
+          <div className="flex items-center justify-center gap-1.5">
+            <NumStepper value={home} onChange={setHome} />
+          </div>
+          <div className="flex items-center justify-center gap-1.5">
+            <NumStepper value={away} onChange={setAway} />
+          </div>
+        </div>
+
+        {/* Desktop: classic 3-column horizontal */}
+        <div className="hidden grid-cols-[1fr_auto_1fr] items-center gap-3 sm:grid">
+          <TeamSide team={{ id: pick.home_id, name: pick.home_name, code: pick.home_code, flag: pick.home_flag }} align="right" />
+          <div className="flex items-center justify-center gap-1.5">
+            <NumStepper value={home} onChange={setHome} />
+            <span className="font-display text-2xl text-cream/30">:</span>
+            <NumStepper value={away} onChange={setAway} />
+          </div>
+          <TeamSide team={{ id: pick.away_id, name: pick.away_name, code: pick.away_code, flag: pick.away_flag }} align="left" />
+        </div>
       </div>
 
       {/* First scorer */}
