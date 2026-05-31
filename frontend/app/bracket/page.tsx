@@ -1,144 +1,221 @@
 'use client'
 
 import { useBracket } from '@/lib/hooks'
-import { BracketSlot } from '@/lib/types'
+import { BracketSlot, Team } from '@/lib/types'
 import { displayScore, stageName } from '@/lib/utils'
 import Image from 'next/image'
 import Link from 'next/link'
 import clsx from 'clsx'
 
-const STAGE_ORDER = ['r32', 'r16', 'qf', 'sf', 'final']
+const STAGE_ORDER = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
 
 export default function BracketPage() {
   const { data: slots, isLoading } = useBracket()
 
-  if (isLoading) return (
-    <div className="space-y-8 animate-pulse">
-      <div className="h-8 w-48 rounded bg-white/5" />
-      {[1, 2, 3].map(i => (
-        <div key={i}>
-          <div className="h-5 w-32 rounded bg-white/5 mb-3" />
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {[1, 2].map(j => <div key={j} className="h-20 rounded-xl bg-white/5" />)}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
+  if (isLoading) return <Skeleton />
 
   const byStage: Record<string, BracketSlot[]> = {}
-  for (const s of slots ?? []) {
+  for (const s of (slots ?? [])) {
     byStage[s.stage] = [...(byStage[s.stage] ?? []), s]
   }
 
+  const stagesPresent = STAGE_ORDER.filter(s => byStage[s]?.length)
+
   return (
     <div className="space-y-12">
-      <div>
-        <h1 className="font-display text-4xl font-black text-cream">Knockout Stage</h1>
-        <p className="mt-1 text-sm text-cream/30">Bracket updates as teams advance</p>
-      </div>
+      {/* Hero */}
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 panel">
+        <div className="absolute inset-0 opacity-50">
+          <div className="absolute -top-32 left-1/2 -translate-x-1/2 h-72 w-[60%] rounded-full bg-amber-500/20 blur-3xl" />
+        </div>
+        <div className="relative px-6 py-10 sm:px-10 sm:py-12">
+          <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">KNOCKOUT STAGE</div>
+          <h1 className="mt-2 font-display text-5xl tracking-tight text-cream sm:text-6xl">
+            ROAD TO THE <span className="text-gold-gradient">FINAL</span>
+          </h1>
+          <p className="mt-3 max-w-xl text-sm text-cream/50">
+            Win or go home. The bracket fills in as teams advance from the group stage.
+            Tap any tie to dive into the full match details.
+          </p>
+        </div>
+      </section>
 
-      {STAGE_ORDER.filter(s => byStage[s]?.length).map(stage => (
-        <section key={stage}>
-          <h2 className="mb-4 font-display text-xl font-bold text-gold tracking-wide">
-            {stageName(stage)}
-          </h2>
-          <div className={clsx(
-            'grid gap-3',
-            stage === 'final' ? 'max-w-md' :
-            stage === 'sf'    ? 'md:grid-cols-2 max-w-2xl' :
-            stage === 'qf'    ? 'md:grid-cols-2 lg:grid-cols-2' :
-            'md:grid-cols-2 lg:grid-cols-3'
-          )}>
-            {byStage[stage].map(slot => (
-              <BracketCard key={slot.slot} slot={slot} />
-            ))}
-          </div>
-        </section>
-      ))}
+      {stagesPresent.length === 0 ? (
+        <EmptyBracket />
+      ) : (
+        stagesPresent.map(stage => (
+          <section key={stage}>
+            <div className="mb-5 flex items-end justify-between">
+              <div>
+                <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">STAGE</div>
+                <h2 className="font-display text-3xl tracking-wide text-cream">
+                  {stageName(stage).toUpperCase()}
+                </h2>
+              </div>
+              <span className="hidden sm:block text-[10px] font-bold tracking-widest text-cream/40">
+                {byStage[stage].length} {byStage[stage].length === 1 ? 'MATCH' : 'MATCHES'}
+              </span>
+            </div>
+
+            <div className={clsx(
+              'grid gap-4',
+              stage === 'final' ? 'max-w-2xl mx-auto' :
+              stage === 'third_place' ? 'max-w-2xl mx-auto' :
+              stage === 'sf' ? 'sm:grid-cols-2' :
+              stage === 'qf' ? 'sm:grid-cols-2' :
+              'sm:grid-cols-2 lg:grid-cols-3'
+            )}>
+              {byStage[stage].map(slot => (
+                <BracketCard key={slot.slot} slot={slot} stage={stage} />
+              ))}
+            </div>
+          </section>
+        ))
+      )}
     </div>
   )
 }
 
-function BracketCard({ slot }: { slot: BracketSlot }) {
-  const hasBoth = slot.home_team && slot.away_team
+function BracketCard({ slot, stage }: { slot: BracketSlot; stage: string }) {
+  const hasMatch = !!slot.match
   const m = slot.match
   const { home, away, suffix } = m ? displayScore(m) : { home: null, away: null, suffix: '' }
   const isLive = m?.status.startsWith('live')
+  const isFinal = m?.status === 'final'
 
-  const Wrapper = m ? Link : 'div'
-  const wrapperProps = m ? { href: `/match/${m.id}` } : {}
-
-  return (
-    // @ts-ignore
-    <Wrapper
-      {...wrapperProps}
-      className={clsx(
-        'block rounded-xl border p-4 transition-all',
-        m ? 'hover:border-gold/30 hover:-translate-y-0.5 cursor-pointer' : 'cursor-default',
-        isLive ? 'border-gold/30 bg-gold/5' : 'border-white/8 bg-white/3'
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        {/* Home */}
-        <TeamSlot
-          team={slot.home_team}
-          seed={slot.home_seed_desc}
-          isWinner={m?.winner_id === slot.home_team?.id}
-        />
-
-        {/* Score or vs */}
-        <div className="text-center shrink-0 min-w-[52px]">
-          {home !== null && away !== null ? (
-            <div>
-              <div className={clsx(
-                'font-mono text-xl font-black',
-                isLive ? 'text-gold' : 'text-cream'
-              )}>
-                {home}–{away}
-              </div>
-              {suffix && <div className="text-[10px] text-gold/50 font-medium">{suffix}</div>}
-            </div>
-          ) : (
-            <span className="text-sm font-mono text-cream/20">vs</span>
-          )}
-        </div>
-
-        {/* Away */}
-        <TeamSlot
-          team={slot.away_team}
-          seed={slot.away_seed_desc}
-          isWinner={m?.winner_id === slot.away_team?.id}
-          reverse
-        />
+  const inner = (
+    <div className={clsx(
+      'relative overflow-hidden rounded-2xl border p-4 transition-all hover-lift',
+      isLive
+        ? 'border-live/40 bg-gradient-to-br from-live/10 to-navy-800/40 shadow-[0_8px_32px_-12px_rgba(239,68,68,0.35)]'
+        : hasMatch
+        ? 'border-white/10 panel hover:border-amber-400/30'
+        : 'border-dashed border-white/10 bg-white/[0.02]'
+    )}>
+      {/* Top label */}
+      <div className="mb-3 flex items-center justify-between text-[10px] font-bold tracking-widest">
+        {isLive ? (
+          <span className="flex items-center gap-1.5 text-live">
+            <span className="live-dot" />
+            LIVE
+          </span>
+        ) : isFinal ? (
+          <span className="text-cream/40">FULL TIME{suffix && !suffix.includes('pens') ? ` · ${suffix.toUpperCase()}` : ''}</span>
+        ) : (
+          <span className="text-cream/40">{stageName(stage).toUpperCase()}</span>
+        )}
+        <span className="text-cream/30">#{slot.slot}</span>
       </div>
-    </Wrapper>
+
+      {/* Teams */}
+      <div className="space-y-2">
+        <BracketRow team={slot.home_team} seed={slot.home_seed_desc} score={home} isWinner={m?.winner_id === slot.home_team?.id} isLive={isLive ?? false} />
+        <BracketRow team={slot.away_team} seed={slot.away_seed_desc} score={away} isWinner={m?.winner_id === slot.away_team?.id} isLive={isLive ?? false} />
+      </div>
+
+      {suffix && suffix.includes('pens') && (
+        <div className="mt-3 text-center">
+          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold tracking-widest text-amber-400">
+            {suffix.toUpperCase()}
+          </span>
+        </div>
+      )}
+    </div>
   )
+
+  if (hasMatch && m) {
+    return <Link href={`/match/${m.id}`} className="block">{inner}</Link>
+  }
+  return inner
 }
 
-function TeamSlot({ team, seed, isWinner, reverse }: {
-  team: any; seed: string | null; isWinner: boolean; reverse?: boolean
+function BracketRow({ team, seed, score, isWinner, isLive }: {
+  team: Team | null; seed: string | null; score: number | null; isWinner: boolean; isLive: boolean
 }) {
   return (
-    <div className={clsx('flex flex-1 items-center gap-2 min-w-0', reverse ? 'flex-row-reverse' : '')}>
+    <div className={clsx(
+      'flex items-center gap-3 rounded-lg px-2.5 py-2',
+      isWinner ? 'bg-amber-500/10 ring-1 ring-amber-400/30' : 'bg-white/[0.02]'
+    )}>
       {team ? (
         <>
-          {team.flag_url ? (
-            <Image src={team.flag_url} alt={team.code} width={28} height={19}
-              className="h-5 w-7 rounded object-cover shrink-0" unoptimized />
-          ) : (
-            <span className="h-5 w-7 rounded bg-white/10 shrink-0" />
-          )}
+          <Flag url={team.flag_url} code={team.code} />
           <span className={clsx(
-            'text-xs font-semibold truncate',
-            isWinner ? 'text-gold' : 'text-cream/70'
+            'flex-1 truncate text-sm font-bold',
+            isWinner ? 'text-cream' : 'text-cream/70'
           )}>
             {team.name}
           </span>
         </>
       ) : (
-        <span className="text-xs text-cream/20 italic truncate">{seed ?? 'TBD'}</span>
+        <>
+          <span className="h-5 w-7 rounded-sm bg-white/10 ring-1 ring-black/40" />
+          <span className="flex-1 truncate text-sm italic text-cream/35">{seed ?? 'TBD'}</span>
+        </>
       )}
+      <span className={clsx(
+        'font-display text-2xl leading-none tabular-nums tracking-tight',
+        score === null ? 'text-cream/15' :
+        isLive ? 'text-amber-400 animate-score-in' :
+        isWinner ? 'text-cream' : 'text-cream/50'
+      )}>
+        {score ?? '–'}
+      </span>
+    </div>
+  )
+}
+
+function Flag({ url, code }: { url: string | null; code: string }) {
+  if (!url) {
+    return (
+      <span className="flex h-5 w-7 items-center justify-center rounded-sm bg-white/10 text-[9px] font-bold text-cream/50 ring-1 ring-black/40">
+        {code}
+      </span>
+    )
+  }
+  return (
+    <Image
+      src={url}
+      alt={code}
+      width={28}
+      height={20}
+      className="h-5 w-7 shrink-0 rounded-sm object-cover ring-1 ring-black/40"
+      unoptimized
+    />
+  )
+}
+
+function EmptyBracket() {
+  return (
+    <div className="rounded-3xl border border-dashed border-white/10 panel px-8 py-16 text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/10 text-3xl">🏆</div>
+      <h2 className="mt-4 font-display text-2xl tracking-wide text-cream">Bracket Coming Soon</h2>
+      <p className="mt-2 max-w-md mx-auto text-sm text-cream/50">
+        The knockout bracket fills in once the group stage concludes and the top two from each
+        group advance. Check back as the tournament progresses.
+      </p>
+      <Link
+        href="/"
+        className="mt-6 inline-flex items-center gap-2 rounded-full bg-gold-gradient px-4 py-2 text-xs font-bold text-ink shadow-gold transition-transform hover:scale-105"
+      >
+        VIEW GROUP STANDINGS →
+      </Link>
+    </div>
+  )
+}
+
+function Skeleton() {
+  return (
+    <div className="space-y-10">
+      <div className="h-48 rounded-3xl shimmer" />
+      {[1, 2, 3].map(i => (
+        <div key={i} className="space-y-4">
+          <div className="h-8 w-48 rounded shimmer" />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map(j => <div key={j} className="h-32 rounded-2xl shimmer" />)}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

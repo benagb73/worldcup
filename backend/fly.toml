@@ -1,0 +1,30 @@
+# fly.toml — Fly.io deployment config for the FastAPI backend.
+#
+# Pick a unique app name (must be globally unique on Fly). After `flyctl
+# launch` or `flyctl apps create`, replace the placeholder below.
+
+app = "worldcup-backend"          # ← change to a globally-unique name
+primary_region = "iad"            # ← e.g. iad (Virginia), lhr (London). Pick one near you.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Free tier: stop machine when idle, wake on first request.
+  # Adds ~2s cold-start latency. Set to "off" for a paid always-on machine.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval     = "30s"
+    timeout      = "5s"
+    grace_period = "10s"
+    method       = "GET"
+    path         = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

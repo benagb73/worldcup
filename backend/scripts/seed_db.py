@@ -167,7 +167,7 @@ async def seed():
                 INSERT OR IGNORE INTO teams (name, code, group_name, flag_url)
                 VALUES (?, ?, ?, ?)
             """, [name, code, group, flag])
-        print(f"✓ Seeded {len(TEAMS)} teams")
+        print(f"[OK] Seeded {len(TEAMS)} teams")
 
         # Venues
         for v_name, city, country, cap in VENUES:
@@ -175,7 +175,7 @@ async def seed():
                 INSERT OR IGNORE INTO venues (name, city, country, capacity)
                 VALUES (?, ?, ?, ?)
             """, [v_name, city, country, cap])
-        print(f"✓ Seeded {len(VENUES)} venues")
+        print(f"[OK] Seeded {len(VENUES)} venues")
 
         # Standings rows (zeroed out)
         for name, code, group, _ in TEAMS:
@@ -185,7 +185,7 @@ async def seed():
                     INSERT OR IGNORE INTO group_standings (group_name, team_id)
                     VALUES (?, ?)
                 """, [group, team["id"]])
-        print("✓ Initialised group standings")
+        print("[OK] Initialised group standings")
 
         # Fixtures
         for match_num, group, home_code, away_code, sched, venue_name in FIXTURES:
@@ -193,7 +193,7 @@ async def seed():
             away  = await db.fetchone("SELECT id FROM teams   WHERE code = ?", [away_code])
             venue = await db.fetchone("SELECT id FROM venues  WHERE name = ?", [venue_name])
             if not home or not away:
-                print(f"  ⚠ Skipping {match_num}: team not found")
+                print(f"  [SKIP] {match_num}: team not found")
                 continue
             await db.execute("""
                 INSERT OR IGNORE INTO matches
@@ -201,7 +201,7 @@ async def seed():
                 VALUES ('group', ?, ?, ?, ?, ?, ?)
             """, [group, match_num, home["id"], away["id"], sched,
                   venue["id"] if venue else None])
-        print(f"✓ Seeded {len(FIXTURES)} fixtures")
+        print(f"[OK] Seeded {len(FIXTURES)} fixtures")
 
         # Bracket
         for stage, slot, home_desc, away_desc in BRACKET_SEEDS:
@@ -209,9 +209,9 @@ async def seed():
                 INSERT OR IGNORE INTO bracket (stage, slot, home_seed_desc, away_seed_desc)
                 VALUES (?, ?, ?, ?)
             """, [stage, slot, home_desc, away_desc])
-        print(f"✓ Seeded {len(BRACKET_SEEDS)} bracket slots")
+        print(f"[OK] Seeded {len(BRACKET_SEEDS)} bracket slots")
 
-    print("\n🌍 Database seeded successfully!")
+    print("\nDatabase seeded successfully!")
 
 
 if __name__ == "__main__":

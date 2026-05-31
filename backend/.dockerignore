@@ -1,0 +1,27 @@
+# Keep the image small + leak nothing
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local DB and secrets — production reads from env vars / Turso
+*.db
+*.sqlite*
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# Misc
+README.md
+*.md

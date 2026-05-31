@@ -20,12 +20,15 @@ from app.models.schemas import (
     MatchSummary,
     Player,
     PlayerMatchStats,
+    PlayerTournamentTotals,
     StandingRow,
     Team,
+    TeamDetail,
     Club,
     Venue,
     MatchScore,
     LineupPlayer,
+    LeaderboardRow,
 )
 
 SYNC_SECRET = os.getenv("SYNC_SECRET", "dev-secret")
@@ -39,12 +42,36 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="World Cup API", version="1.0.0", lifespan=lifespan)
 
+# Comma-separated list of allowed origins. In production, set this to your
+# Vercel domain (e.g. "https://worldcup.vercel.app,https://worldcup-yourname.vercel.app").
+# Empty / unset = wildcard (fine for local dev only).
+_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+_allowed_origins = (
+    [o.strip() for o in _origins_env.split(",") if o.strip()]
+    if _origins_env else ["*"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],    # tighten in production
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Hidden admin router — gated by X-Admin-Secret header inside the module
+from app.api.admin import router as admin_router  # noqa: E402
+app.include_router(admin_router)
+
+# Public competition router (family prediction game)
+from app.api.compete import router as compete_router  # noqa: E402
+app.include_router(compete_router)
+
+# Admin-only scoring-config update lives on the secured admin router
+from app.api.compete import update_scoring_config, ScoringUpdate  # noqa: E402
+
+@admin_router.put("/scoring")
+async def admin_update_scoring(body: ScoringUpdate):
+    return await update_scoring_config(body)
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +85,7 @@ def _team(row: dict) -> Team:
         code=row["team_code"],
         group_name=row.get("team_group"),
         flag_url=row.get("flag_url"),
+        world_rank=row.get("team_rank"),
     )
 
 
@@ -75,6 +103,21 @@ def _score(row: dict) -> MatchScore:
 
 
 async def _build_match_summary(row: dict) -> MatchSummary:
+    # Knockout placeholder rows may have NULL teams until winners are determined
+    home_team = None
+    if row.get("home_id"):
+        home_team = Team(
+            id=row["home_id"], name=row["home_name"], code=row["home_code"],
+            group_name=row.get("home_group"), flag_url=row.get("home_flag"),
+            world_rank=row.get("home_rank"),
+        )
+    away_team = None
+    if row.get("away_id"):
+        away_team = Team(
+            id=row["away_id"], name=row["away_name"], code=row["away_code"],
+            group_name=row.get("away_group"), flag_url=row.get("away_flag"),
+            world_rank=row.get("away_rank"),
+        )
     return MatchSummary(
         id=row["id"],
         stage=row["stage"],
@@ -82,14 +125,8 @@ async def _build_match_summary(row: dict) -> MatchSummary:
         match_number=row.get("match_number"),
         scheduled_at=row["scheduled_at"],
         status=row["status"],
-        home_team=Team(
-            id=row["home_id"], name=row["home_name"], code=row["home_code"],
-            group_name=row.get("home_group"), flag_url=row.get("home_flag"),
-        ),
-        away_team=Team(
-            id=row["away_id"], name=row["away_name"], code=row["away_code"],
-            group_name=row.get("away_group"), flag_url=row.get("away_flag"),
-        ),
+        home_team=home_team,
+        away_team=away_team,
         score=MatchScore(
             ht_home=row.get("ht_home"), ht_away=row.get("ht_away"),
             ft_home=row.get("ft_home"), ft_away=row.get("ft_away"),
@@ -101,6 +138,7 @@ async def _build_match_summary(row: dict) -> MatchSummary:
             id=row["venue_id"], name=row["venue_name"],
             city=row["venue_city"], country=row["venue_country"],
             capacity=row.get("venue_capacity"),
+            number_games=row.get("venue_games"),
         ) if row.get("venue_id") else None,
     )
 
@@ -112,11 +150,14 @@ MATCH_SELECT = """
         m.ht_home, m.ht_away, m.ft_home, m.ft_away,
         m.et_home, m.et_away, m.pen_home, m.pen_away,
         ht.id   AS home_id,   ht.name AS home_name,
-        ht.code AS home_code, ht.group_name AS home_group, ht.flag_url AS home_flag,
+        ht.code AS home_code, ht.group_name AS home_group,
+        ht.flag_url AS home_flag, ht.world_rank AS home_rank,
         at.id   AS away_id,   at.name AS away_name,
-        at.code AS away_code, at.group_name AS away_group, at.flag_url AS away_flag,
+        at.code AS away_code, at.group_name AS away_group,
+        at.flag_url AS away_flag, at.world_rank AS away_rank,
         v.id    AS venue_id,  v.name AS venue_name,
-        v.city  AS venue_city, v.country AS venue_country, v.capacity AS venue_capacity
+        v.city  AS venue_city, v.country AS venue_country,
+        v.capacity AS venue_capacity, v.number_games AS venue_games
     FROM matches m
     LEFT JOIN teams  ht ON m.home_team_id = ht.id
     LEFT JOIN teams  at ON m.away_team_id = at.id
@@ -136,7 +177,7 @@ async def get_groups():
             SELECT gs.group_name, gs.played, gs.won, gs.drawn, gs.lost,
                    gs.goals_for, gs.goals_against, gs.goal_diff, gs.points,
                    t.id AS team_id, t.name AS team_name, t.code AS team_code,
-                   t.group_name AS team_group, t.flag_url
+                   t.group_name AS team_group, t.flag_url, t.world_rank AS team_rank
             FROM group_standings gs
             JOIN teams t ON gs.team_id = t.id
             ORDER BY gs.group_name, gs.points DESC, gs.goal_diff DESC, gs.goals_for DESC
@@ -156,6 +197,140 @@ async def get_groups():
         )
 
     return [GroupStandings(group_name=g, rows=r) for g, r in sorted(groups.items())]
+
+
+# ---------------------------------------------------------------------------
+# Team detail (roster + tournament totals + fixtures + standing)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/teams/{team_id}/roster")
+async def get_team_roster(team_id: int):
+    """Lightweight public roster — used by the family-competition pick form."""
+    async with get_db() as db:
+        rows = await db.fetchall("""
+            SELECT id, name, shirt_number, position
+            FROM players WHERE team_id = ?
+            ORDER BY
+              CASE position
+                WHEN 'GK' THEN 0 WHEN 'DEF' THEN 1
+                WHEN 'MID' THEN 2 WHEN 'FWD' THEN 3 ELSE 4
+              END,
+              COALESCE(shirt_number, 99), name
+        """, [team_id])
+    return rows
+
+
+@app.get("/api/teams/{team_id}", response_model=TeamDetail)
+async def get_team(team_id: int):
+    async with get_db() as db:
+        team_row = await db.fetchone(
+            "SELECT id, name, code, group_name, flag_url, world_rank FROM teams WHERE id = ?",
+            [team_id]
+        )
+        if not team_row:
+            raise HTTPException(404, "Team not found")
+        team = Team(
+            id=team_row["id"], name=team_row["name"], code=team_row["code"],
+            group_name=team_row.get("group_name"), flag_url=team_row.get("flag_url"),
+            world_rank=team_row.get("world_rank"),
+        )
+
+        # Group standing — None for knockout-only teams (no group_name)
+        standing: Optional[StandingRow] = None
+        if team.group_name:
+            st = await db.fetchone("""
+                SELECT played, won, drawn, lost, goals_for, goals_against,
+                       goal_diff, points
+                FROM group_standings WHERE team_id = ? AND group_name = ?
+            """, [team_id, team.group_name])
+            if st:
+                standing = StandingRow(
+                    team=team,
+                    played=st["played"], won=st["won"], drawn=st["drawn"], lost=st["lost"],
+                    goals_for=st["goals_for"], goals_against=st["goals_against"],
+                    goal_diff=st["goal_diff"], points=st["points"],
+                )
+
+        # Fixtures involving this team (chronological)
+        fx_rows = await db.fetchall(
+            f"{MATCH_SELECT} WHERE m.home_team_id = ? OR m.away_team_id = ? "
+            "ORDER BY m.scheduled_at",
+            [team_id, team_id]
+        )
+        fixtures = [await _build_match_summary(r) for r in fx_rows]
+
+        # Roster + aggregated tournament totals
+        roster_rows = await db.fetchall("""
+            SELECT p.id, p.name, p.shirt_number, p.position, p.date_of_birth, p.club_status,
+                   c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague
+            FROM players p
+            LEFT JOIN clubs c ON p.club_id = c.id
+            WHERE p.team_id = ?
+            ORDER BY
+                CASE p.position
+                    WHEN 'GK' THEN 0 WHEN 'DEF' THEN 1
+                    WHEN 'MID' THEN 2 WHEN 'FWD' THEN 3 ELSE 4
+                END,
+                COALESCE(p.shirt_number, 99), p.name
+        """, [team_id])
+
+        # Pull aggregate stats in one query keyed by player_id
+        stat_rows = await db.fetchall("""
+            SELECT player_id,
+                   COUNT(*)              AS apps,
+                   COALESCE(SUM(minutes_played), 0)    AS minutes_played,
+                   COALESCE(SUM(goals), 0)             AS goals,
+                   COALESCE(SUM(assists), 0)           AS assists,
+                   COALESCE(SUM(shots_total), 0)       AS shots_total,
+                   COALESCE(SUM(shots_on_target), 0)   AS shots_on_target,
+                   COALESCE(SUM(passes_completed), 0)  AS passes_completed,
+                   COALESCE(SUM(passes_attempted), 0)  AS passes_attempted,
+                   COALESCE(SUM(tackles_made), 0)      AS tackles_made,
+                   COALESCE(SUM(fouls_committed), 0)   AS fouls_committed,
+                   COALESCE(SUM(fouls_won), 0)         AS fouls_won,
+                   COALESCE(SUM(yellow_cards), 0)      AS yellow_cards,
+                   COALESCE(SUM(red_cards), 0)         AS red_cards,
+                   COALESCE(SUM(saves), 0)             AS saves,
+                   COALESCE(SUM(goals_conceded), 0)    AS goals_conceded
+            FROM player_match_stats
+            WHERE team_id = ?
+            GROUP BY player_id
+        """, [team_id])
+        totals_by_pid = {r["player_id"]: r for r in stat_rows}
+
+        squad: list[PlayerTournamentTotals] = []
+        for pr in roster_rows:
+            club = Club(id=pr["cid"], name=pr["cname"], country=pr["ccountry"],
+                        league=pr["cleague"]) if pr.get("cid") else None
+            player = Player(
+                id=pr["id"], team_id=team_id, name=pr["name"],
+                shirt_number=pr.get("shirt_number"),
+                position=pr.get("position"),
+                date_of_birth=pr.get("date_of_birth"),
+                club=club,
+                club_status=pr.get("club_status"),
+            )
+            t = totals_by_pid.get(pr["id"], {})
+            squad.append(PlayerTournamentTotals(
+                player=player,
+                apps=t.get("apps", 0),
+                minutes_played=t.get("minutes_played", 0),
+                goals=t.get("goals", 0),
+                assists=t.get("assists", 0),
+                shots_total=t.get("shots_total", 0),
+                shots_on_target=t.get("shots_on_target", 0),
+                passes_completed=t.get("passes_completed", 0),
+                passes_attempted=t.get("passes_attempted", 0),
+                tackles_made=t.get("tackles_made", 0),
+                fouls_committed=t.get("fouls_committed", 0),
+                fouls_won=t.get("fouls_won", 0),
+                yellow_cards=t.get("yellow_cards", 0),
+                red_cards=t.get("red_cards", 0),
+                saves=t.get("saves", 0),
+                goals_conceded=t.get("goals_conceded", 0),
+            ))
+
+    return TeamDetail(team=team, standing=standing, fixtures=fixtures, squad=squad)
 
 
 # ---------------------------------------------------------------------------
@@ -245,9 +420,9 @@ async def get_match(match_id: int):
             SELECT ml.is_starter, ml.position_played, ml.shirt_number,
                    ml.team_id,
                    p.id AS pid, p.name AS pname, p.position AS ppos,
-                   p.shirt_number AS psquad_num, p.date_of_birth,
+                   p.shirt_number AS psquad_num, p.date_of_birth, p.club_status,
                    t.id AS tid, t.name AS tname, t.code AS tcode,
-                   t.group_name AS tgroup, t.flag_url,
+                   t.group_name AS tgroup, t.flag_url, t.world_rank,
                    c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague
             FROM match_lineups ml
             JOIN players p ON ml.player_id = p.id
@@ -264,7 +439,8 @@ async def get_match(match_id: int):
             if tid not in team_lineups:
                 team_lineups[tid] = {
                     "team": Team(id=lr["tid"], name=lr["tname"], code=lr["tcode"],
-                                 group_name=lr.get("tgroup"), flag_url=lr.get("flag_url")),
+                                 group_name=lr.get("tgroup"), flag_url=lr.get("flag_url"),
+                                 world_rank=lr.get("world_rank")),
                     "starters": [],
                     "substitutes": [],
                 }
@@ -273,7 +449,8 @@ async def get_match(match_id: int):
             player = Player(id=lr["pid"], team_id=tid, name=lr["pname"],
                             shirt_number=lr.get("psquad_num"),
                             position=lr.get("ppos"),
-                            date_of_birth=lr.get("date_of_birth"), club=club)
+                            date_of_birth=lr.get("date_of_birth"), club=club,
+                            club_status=lr.get("club_status"))
             lp = LineupPlayer(
                 player=player,
                 is_starter=bool(lr["is_starter"]),
@@ -291,10 +468,10 @@ async def get_match(match_id: int):
         stat_rows = await db.fetchall("""
             SELECT pms.*,
                    p.name AS pname, p.position AS ppos, p.shirt_number AS psquad_num,
-                   p.date_of_birth,
+                   p.date_of_birth, p.club_status,
                    c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague,
                    t.id AS tid, t.name AS tname, t.code AS tcode,
-                   t.group_name AS tgroup, t.flag_url
+                   t.group_name AS tgroup, t.flag_url, t.world_rank
             FROM player_match_stats pms
             JOIN players p ON pms.player_id = p.id
             JOIN teams   t ON pms.team_id   = t.id
@@ -308,9 +485,11 @@ async def get_match(match_id: int):
                         league=sr["cleague"]) if sr.get("cid") else None
             player = Player(id=sr["player_id"], team_id=sr["tid"], name=sr["pname"],
                             shirt_number=sr.get("psquad_num"), position=sr.get("ppos"),
-                            date_of_birth=sr.get("date_of_birth"), club=club)
+                            date_of_birth=sr.get("date_of_birth"), club=club,
+                            club_status=sr.get("club_status"))
             team = Team(id=sr["tid"], name=sr["tname"], code=sr["tcode"],
-                        group_name=sr.get("tgroup"), flag_url=sr.get("flag_url"))
+                        group_name=sr.get("tgroup"), flag_url=sr.get("flag_url"),
+                        world_rank=sr.get("world_rank"))
             stats.append(PlayerMatchStats(
                 player=player, team=team,
                 is_starter=bool(sr["is_starter"]),
@@ -321,6 +500,8 @@ async def get_match(match_id: int):
                 passes_completed=sr["passes_completed"], passes_attempted=sr["passes_attempted"],
                 tackles_made=sr["tackles_made"], interceptions=sr["interceptions"],
                 clearances=sr["clearances"],
+                fouls_committed=sr["fouls_committed"] or 0,
+                fouls_won=sr["fouls_won"] or 0,
                 yellow_cards=sr["yellow_cards"], red_cards=sr["red_cards"],
                 saves=sr["saves"], goals_conceded=sr["goals_conceded"],
                 penalty_saves=sr["penalty_saves"],
@@ -348,7 +529,8 @@ async def get_player(player_id: int):
                 league=row["cleague"]) if row.get("cid") else None
     return Player(id=row["id"], team_id=row["team_id"], name=row["name"],
                   shirt_number=row.get("shirt_number"), position=row.get("position"),
-                  date_of_birth=row.get("date_of_birth"), club=club)
+                  date_of_birth=row.get("date_of_birth"), club=club,
+                  club_status=row.get("club_status"))
 
 
 @app.get("/api/players/{player_id}/stats", response_model=list[PlayerMatchStats])
@@ -358,10 +540,10 @@ async def get_player_stats(player_id: int):
         rows = await db.fetchall("""
             SELECT pms.*,
                    p.name AS pname, p.position AS ppos, p.shirt_number AS psquad_num,
-                   p.date_of_birth,
+                   p.date_of_birth, p.club_status,
                    c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague,
                    t.id AS tid, t.name AS tname, t.code AS tcode,
-                   t.group_name AS tgroup, t.flag_url
+                   t.group_name AS tgroup, t.flag_url, t.world_rank
             FROM player_match_stats pms
             JOIN players p ON pms.player_id = p.id
             JOIN teams   t ON pms.team_id   = t.id
@@ -376,9 +558,11 @@ async def get_player_stats(player_id: int):
                     league=sr["cleague"]) if sr.get("cid") else None
         player = Player(id=sr["player_id"], team_id=sr["tid"], name=sr["pname"],
                         shirt_number=sr.get("psquad_num"), position=sr.get("ppos"),
-                        date_of_birth=sr.get("date_of_birth"), club=club)
+                        date_of_birth=sr.get("date_of_birth"), club=club,
+                        club_status=sr.get("club_status"))
         team = Team(id=sr["tid"], name=sr["tname"], code=sr["tcode"],
-                    group_name=sr.get("tgroup"), flag_url=sr.get("flag_url"))
+                    group_name=sr.get("tgroup"), flag_url=sr.get("flag_url"),
+                    world_rank=sr.get("world_rank"))
         result.append(PlayerMatchStats(
             player=player, team=team,
             is_starter=bool(sr["is_starter"]), minutes_played=sr["minutes_played"],
@@ -388,11 +572,49 @@ async def get_player_stats(player_id: int):
             passes_completed=sr["passes_completed"], passes_attempted=sr["passes_attempted"],
             tackles_made=sr["tackles_made"], interceptions=sr["interceptions"],
             clearances=sr["clearances"],
+            fouls_committed=sr["fouls_committed"] or 0,
+            fouls_won=sr["fouls_won"] or 0,
             yellow_cards=sr["yellow_cards"], red_cards=sr["red_cards"],
             saves=sr["saves"], goals_conceded=sr["goals_conceded"],
             penalty_saves=sr["penalty_saves"],
         ))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard — aggregated tournament stats for every player who has played
+# ---------------------------------------------------------------------------
+
+@app.get("/api/leaderboard", response_model=list[LeaderboardRow])
+async def get_leaderboard():
+    async with get_db() as db:
+        rows = await db.fetchall("""
+            SELECT
+                p.id  AS player_id, p.name AS player_name, p.shirt_number, p.position,
+                t.id  AS team_id, t.name AS team_name, t.code AS team_code, t.flag_url,
+                COUNT(*)                              AS apps,
+                COALESCE(SUM(pms.minutes_played), 0)  AS minutes_played,
+                COALESCE(SUM(pms.goals), 0)           AS goals,
+                COALESCE(SUM(pms.assists), 0)         AS assists,
+                COALESCE(SUM(pms.shots_total), 0)     AS shots_total,
+                COALESCE(SUM(pms.shots_on_target), 0) AS shots_on_target,
+                COALESCE(SUM(pms.passes_completed), 0) AS passes_completed,
+                COALESCE(SUM(pms.passes_attempted), 0) AS passes_attempted,
+                COALESCE(SUM(pms.tackles_made), 0)    AS tackles_made,
+                COALESCE(SUM(pms.fouls_committed), 0) AS fouls_committed,
+                COALESCE(SUM(pms.fouls_won), 0)       AS fouls_won,
+                COALESCE(SUM(pms.yellow_cards), 0)    AS yellow_cards,
+                COALESCE(SUM(pms.red_cards), 0)       AS red_cards,
+                COALESCE(SUM(pms.saves), 0)           AS saves,
+                COALESCE(SUM(pms.goals_conceded), 0)  AS goals_conceded
+            FROM player_match_stats pms
+            JOIN players p ON pms.player_id = p.id
+            JOIN teams   t ON pms.team_id   = t.id
+            GROUP BY p.id
+            HAVING SUM(pms.minutes_played) > 0
+            ORDER BY minutes_played DESC, p.name
+        """)
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -406,9 +628,9 @@ async def get_bracket():
             SELECT b.id, b.stage, b.slot, b.home_seed_desc, b.away_seed_desc,
                    b.match_id,
                    ht.id AS htid, ht.name AS htname, ht.code AS htcode,
-                   ht.group_name AS htgroup, ht.flag_url AS htflag,
+                   ht.group_name AS htgroup, ht.flag_url AS htflag, ht.world_rank AS htrank,
                    at.id AS atid, at.name AS atname, at.code AS atcode,
-                   at.group_name AS atgroup, at.flag_url AS atflag
+                   at.group_name AS atgroup, at.flag_url AS atflag, at.world_rank AS atrank
             FROM bracket b
             LEFT JOIN teams ht ON b.home_team_id = ht.id
             LEFT JOIN teams at ON b.away_team_id = at.id
@@ -429,10 +651,12 @@ async def get_bracket():
         result.append(BracketSlot(
             slot=r["slot"], stage=r["stage"],
             home_team=Team(id=r["htid"], name=r["htname"], code=r["htcode"],
-                           group_name=r.get("htgroup"), flag_url=r.get("htflag"))
+                           group_name=r.get("htgroup"), flag_url=r.get("htflag"),
+                           world_rank=r.get("htrank"))
             if r.get("htid") else None,
             away_team=Team(id=r["atid"], name=r["atname"], code=r["atcode"],
-                           group_name=r.get("atgroup"), flag_url=r.get("atflag"))
+                           group_name=r.get("atgroup"), flag_url=r.get("atflag"),
+                           world_rank=r.get("atrank"))
             if r.get("atid") else None,
             home_seed_desc=r.get("home_seed_desc"),
             away_seed_desc=r.get("away_seed_desc"),

@@ -18,14 +18,16 @@ from datetime import datetime, timezone
 from app.db.connection import get_db
 
 API_KEY    = os.getenv("API_FOOTBALL_KEY", "")
-API_HOST   = os.getenv("API_FOOTBALL_HOST", "api-football-v3.p.rapidapi.com")
+API_HOST   = os.getenv("API_FOOTBALL_HOST", "v3.football.api-sports.io")
 SEASON     = os.getenv("WC_SEASON", "2026")
 LEAGUE_ID  = os.getenv("WC_LEAGUE_ID", "1")
 
-HEADERS = {
-    "X-RapidAPI-Key":  API_KEY,
-    "X-RapidAPI-Host": API_HOST,
-}
+_USE_RAPIDAPI = "rapidapi" in API_HOST.lower()
+HEADERS = (
+    {"X-RapidAPI-Key": API_KEY, "X-RapidAPI-Host": API_HOST}
+    if _USE_RAPIDAPI
+    else {"x-apisports-key": API_KEY}
+)
 
 BASE = f"https://{API_HOST}"
 

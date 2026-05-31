@@ -1,76 +1,130 @@
 import Image from 'next/image'
+import Link from 'next/link'
 import { GroupStandings, StandingRow } from '@/lib/types'
 import clsx from 'clsx'
 
 export function GroupTable({ group }: { group: GroupStandings }) {
   return (
-    <div className="rounded-xl border border-white/8 overflow-hidden">
+    <div className="panel hover-lift overflow-hidden rounded-2xl">
       {/* Header */}
-      <div className="flex items-center justify-between bg-white/5 px-4 py-3">
-        <h2 className="font-display text-lg font-bold text-gold tracking-wide">
-          Group {group.group_name}
-        </h2>
-        <div className="grid grid-cols-4 gap-4 text-xs font-medium text-cream/30 text-center w-36">
-          <span>P</span><span>W</span><span>D</span><span>Pts</span>
+      <div className="flex items-center justify-between gap-3 border-b border-white/5 bg-gradient-to-r from-navy-700/60 to-navy-800/40 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-gold-gradient font-display text-lg text-ink shadow-gold">
+            {group.group_name}
+          </span>
+          <div>
+            <div className="font-display text-base tracking-widest text-cream">GROUP {group.group_name}</div>
+            <div className="text-[10px] font-semibold tracking-[0.25em] text-cream/40">STANDINGS</div>
+          </div>
         </div>
       </div>
 
+      {/* Column header */}
+      <div className="grid grid-cols-[22px_1fr_repeat(4,minmax(0,22px))_minmax(0,32px)] items-center gap-1 border-b border-white/5 bg-white/[0.02] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-cream/40 sm:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))]">
+        <span className="text-center">#</span>
+        <span>Team</span>
+        <span className="text-center">P</span>
+        <span className="text-center">W</span>
+        <span className="text-center">D</span>
+        <span className="hidden text-center sm:block">L</span>
+        <span className="text-center">GF</span>
+        <span className="hidden text-center sm:block">GA</span>
+        <span className="text-center text-gold">PTS</span>
+      </div>
+
       {/* Rows */}
-      <div className="divide-y divide-white/5">
+      <div>
         {group.rows.map((row, i) => (
           <StandingRowItem key={row.team.id} row={row} rank={i + 1} />
         ))}
+      </div>
+
+      {/* Footer legend */}
+      <div className="border-t border-white/5 bg-black/20 px-4 py-2.5 flex items-center gap-4 text-[10px] text-cream/40">
+        <span className="flex items-center gap-1.5">
+          <span className="h-1.5 w-3 rounded-sm bg-gold" />
+          <span>Advance to KO</span>
+        </span>
       </div>
     </div>
   )
 }
 
 function StandingRowItem({ row, rank }: { row: StandingRow; rank: number }) {
-  const qualifies = rank <= 2  // top 2 advance (simplified — 3rd place logic separate)
+  const qualifies = rank <= 2
 
   return (
-    <div className={clsx(
-      'flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-white/3',
-      qualifies ? '' : 'opacity-60'
-    )}>
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        {/* Rank indicator */}
-        <span className={clsx(
-          'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold',
-          rank === 1 ? 'bg-gold text-carbon' :
-          rank === 2 ? 'bg-white/20 text-cream' :
-          'text-cream/30'
-        )}>
-          {rank}
-        </span>
+    <Link
+      href={`/team/${row.team.id}`}
+      className={clsx(
+        'group/row relative grid grid-cols-[22px_1fr_repeat(4,minmax(0,22px))_minmax(0,32px)] items-center gap-1 px-3 py-2.5 text-sm transition-colors sm:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))]',
+        'hover:bg-white/[0.04]',
+        qualifies ? '' : 'opacity-75'
+      )}
+    >
+      {/* Left qualification stripe */}
+      <span className={clsx(
+        'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r',
+        qualifies ? 'bg-gold' : 'bg-transparent'
+      )} />
 
-        {/* Flag */}
-        {row.team.flag_url ? (
-          <Image
-            src={row.team.flag_url}
-            alt={row.team.code}
-            width={28}
-            height={19}
-            className="rounded shrink-0 object-cover"
-            unoptimized
-          />
-        ) : (
-          <span className="h-5 w-7 rounded bg-white/10 shrink-0" />
-        )}
+      {/* Rank */}
+      <span className={clsx(
+        'flex h-5 w-5 items-center justify-center rounded text-[11px] font-bold tabular-nums',
+        rank === 1 ? 'bg-gold text-ink' :
+        rank === 2 ? 'bg-amber-500/30 text-amber-400' :
+        'text-cream/40'
+      )}>
+        {rank}
+      </span>
 
-        {/* Name */}
-        <span className="text-sm font-medium text-cream truncate">
+      {/* Team */}
+      <div className="flex items-center gap-2.5 min-w-0">
+        <Flag url={row.team.flag_url} code={row.team.code} />
+        <span className="truncate text-sm font-semibold text-cream">
           {row.team.name}
         </span>
+        {row.team.world_rank != null && (
+          <span
+            title={`FIFA world ranking #${row.team.world_rank}`}
+            className="hidden shrink-0 rounded-sm bg-white/5 px-1 py-px font-mono text-[9px] font-bold text-amber-400/70 sm:inline"
+          >
+            #{row.team.world_rank}
+          </span>
+        )}
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 text-xs text-center w-36 shrink-0">
-        <span className="text-cream/50">{row.played}</span>
-        <span className="text-cream/50">{row.won}</span>
-        <span className="text-cream/50">{row.drawn}</span>
-        <span className="font-bold text-cream">{row.points}</span>
-      </div>
-    </div>
+      <span className="text-center font-mono text-xs text-cream/60 tabular-nums">{row.played}</span>
+      <span className="text-center font-mono text-xs text-cream/60 tabular-nums">{row.won}</span>
+      <span className="text-center font-mono text-xs text-cream/60 tabular-nums">{row.drawn}</span>
+      <span className="hidden text-center font-mono text-xs text-cream/60 tabular-nums sm:block">{row.lost}</span>
+      <span className="text-center font-mono text-xs tabular-nums">
+        <span className="text-cream/60">{row.goals_for}</span>
+        <span className="text-cream/30 sm:hidden">:{row.goals_against}</span>
+      </span>
+      <span className="hidden text-center font-mono text-xs text-cream/60 tabular-nums sm:block">{row.goals_against}</span>
+      <span className="text-center font-mono text-sm font-black text-gold tabular-nums">{row.points}</span>
+    </Link>
+  )
+}
+
+function Flag({ url, code }: { url: string | null; code: string }) {
+  if (!url) {
+    return (
+      <span className="flex h-4 w-6 shrink-0 items-center justify-center rounded-sm bg-white/10 text-[9px] font-bold text-cream/50">
+        {code}
+      </span>
+    )
+  }
+  return (
+    <Image
+      src={url}
+      alt={code}
+      width={24}
+      height={16}
+      className="h-4 w-6 shrink-0 rounded-sm object-cover ring-1 ring-black/40"
+      unoptimized
+    />
   )
 }

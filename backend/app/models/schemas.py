@@ -18,12 +18,13 @@ class Team(BaseModel):
     code: str
     group_name: Optional[str]
     flag_url: Optional[str]
+    world_rank: Optional[int] = None
 
 
 class Club(BaseModel):
     id: int
     name: str
-    country: str
+    country: str        # 3-letter code (e.g. 'ENG', 'ESP')
     league: str
 
 
@@ -35,6 +36,7 @@ class Player(BaseModel):
     position: Optional[str]
     date_of_birth: Optional[str]
     club: Optional[Club]
+    club_status: Optional[str] = None   # 'unattached' / 'unknown' / None
 
 
 class Venue(BaseModel):
@@ -43,6 +45,7 @@ class Venue(BaseModel):
     city: str
     country: str
     capacity: Optional[int]
+    number_games: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +91,8 @@ class MatchSummary(BaseModel):
     match_number: Optional[int]
     scheduled_at: str
     status: str
-    home_team: Team
-    away_team: Team
+    home_team: Optional[Team]     # may be None on knockout placeholder rows
+    away_team: Optional[Team]     # may be None on knockout placeholder rows
     score: MatchScore
     winner_id: Optional[int]
     venue: Optional[Venue]
@@ -156,6 +159,8 @@ class PlayerMatchStats(BaseModel):
     tackles_made: int
     interceptions: int
     clearances: int
+    fouls_committed: int = 0
+    fouls_won: int = 0
     yellow_cards: int
     red_cards: int
     saves: int
@@ -186,3 +191,63 @@ class BracketSlot(BaseModel):
     home_seed_desc: Optional[str]
     away_seed_desc: Optional[str]
     match: Optional[MatchSummary]
+
+
+# ---------------------------------------------------------------------------
+# Team detail
+# ---------------------------------------------------------------------------
+
+class PlayerTournamentTotals(BaseModel):
+    player: Player
+    apps: int                  # matches with a stats row (i.e. dressed for the match)
+    minutes_played: int
+    goals: int
+    assists: int
+    shots_total: int
+    shots_on_target: int
+    passes_completed: int = 0
+    passes_attempted: int = 0
+    tackles_made: int = 0
+    fouls_committed: int = 0
+    fouls_won: int = 0
+    yellow_cards: int
+    red_cards: int
+    saves: int
+    goals_conceded: int        # mostly for GK
+
+
+class TeamDetail(BaseModel):
+    team: Team
+    standing: Optional[StandingRow]   # None for knockout-only teams
+    fixtures: list[MatchSummary]
+    squad: list[PlayerTournamentTotals]
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard — one aggregated row per player across the tournament
+# ---------------------------------------------------------------------------
+
+class LeaderboardRow(BaseModel):
+    player_id: int
+    player_name: str
+    shirt_number: Optional[int]
+    position: Optional[str]
+    team_id: int
+    team_name: str
+    team_code: str
+    flag_url: Optional[str]
+    apps: int
+    minutes_played: int
+    goals: int
+    assists: int
+    shots_total: int
+    shots_on_target: int
+    passes_completed: int
+    passes_attempted: int
+    tackles_made: int
+    fouls_committed: int
+    fouls_won: int
+    yellow_cards: int
+    red_cards: int
+    saves: int
+    goals_conceded: int

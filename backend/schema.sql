@@ -12,8 +12,9 @@ CREATE TABLE IF NOT EXISTS teams (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL,
   code        TEXT NOT NULL UNIQUE,   -- e.g. 'BRA', 'FRA'
-  group_name  TEXT,                   -- 'A'..'H', NULL for knockout-only teams
+  group_name  TEXT,                   -- 'A'..'L' (WC 2026 has 12 groups), NULL otherwise
   flag_url    TEXT,
+  world_rank  INTEGER,                -- FIFA world ranking at time of seeding
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS players (
   shirt_number  INTEGER,
   position      TEXT CHECK(position IN ('GK','DEF','MID','FWD')),
   date_of_birth TEXT,
+  club_status   TEXT,                 -- 'unattached' / 'unknown' when club_id is NULL
   created_at    TEXT DEFAULT (datetime('now'))
 );
 
@@ -45,11 +47,12 @@ CREATE TABLE IF NOT EXISTS players (
 -- VENUES
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS venues (
-  id       INTEGER PRIMARY KEY AUTOINCREMENT,
-  name     TEXT NOT NULL,
-  city     TEXT NOT NULL,
-  country  TEXT NOT NULL,
-  capacity INTEGER
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  city          TEXT NOT NULL,
+  country       TEXT NOT NULL,
+  capacity      INTEGER,
+  number_games  INTEGER                -- how many WC matches are scheduled here
 );
 
 -- ------------------------------------------------------------
@@ -203,6 +206,8 @@ CREATE TABLE IF NOT EXISTS player_match_stats (
   tackles_made      INTEGER DEFAULT 0,
   interceptions     INTEGER DEFAULT 0,
   clearances        INTEGER DEFAULT 0,
+  fouls_committed   INTEGER DEFAULT 0,
+  fouls_won         INTEGER DEFAULT 0,
 
   -- Discipline
   yellow_cards      INTEGER DEFAULT 0,
@@ -215,6 +220,48 @@ CREATE TABLE IF NOT EXISTS player_match_stats (
 
   UNIQUE(match_id, player_id)
 );
+
+-- ------------------------------------------------------------
+-- COMPETITION — family score-picking game
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS competitors (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  team_name   TEXT NOT NULL UNIQUE,    -- displayed handle (unique so we can build URLs)
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS picks (
+  id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+  competitor_id            INTEGER NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+  match_id                 INTEGER NOT NULL REFERENCES matches(id),
+  home_score               INTEGER NOT NULL,
+  away_score               INTEGER NOT NULL,
+  -- NULL when the competitor picked "no goal scored" (with no_goal=1).
+  -- A real player_id when they picked a specific scorer.
+  first_scorer_player_id   INTEGER REFERENCES players(id),
+  no_goal                  INTEGER NOT NULL DEFAULT 0 CHECK(no_goal IN (0,1)),
+  is_joker                 INTEGER NOT NULL DEFAULT 0 CHECK(is_joker IN (0,1)),
+  -- Filled in by the scoring engine once the match is final
+  points_awarded           INTEGER,
+  created_at               TEXT DEFAULT (datetime('now')),
+  updated_at               TEXT DEFAULT (datetime('now')),
+  UNIQUE(competitor_id, match_id)
+);
+
+-- Single-row config (id is always 1) controlling how picks are scored.
+CREATE TABLE IF NOT EXISTS comp_scoring (
+  id                    INTEGER PRIMARY KEY CHECK(id = 1),
+  result_points         INTEGER NOT NULL DEFAULT 2,    -- correct win/draw/loss
+  both_scores_points    INTEGER NOT NULL DEFAULT 5,    -- correct exact score
+  one_score_points      INTEGER NOT NULL DEFAULT 1,    -- correct just one team's goals
+  first_scorer_points   INTEGER NOT NULL DEFAULT 3,    -- correct first scorer (or no-goal pick)
+  joker_multiplier      INTEGER NOT NULL DEFAULT 2,    -- multiplies total points on joker matches
+  pen_winner_bonus_goal INTEGER NOT NULL DEFAULT 1     -- in knockouts, add this many goals to pen-winner's effective score
+);
+
+-- Seed the singleton row only on first creation
+INSERT OR IGNORE INTO comp_scoring (id) VALUES (1);
 
 -- ------------------------------------------------------------
 -- INDEXES
@@ -231,3 +278,5 @@ CREATE INDEX IF NOT EXISTS idx_stats_match          ON player_match_stats(match_
 CREATE INDEX IF NOT EXISTS idx_stats_player         ON player_match_stats(player_id);
 CREATE INDEX IF NOT EXISTS idx_players_team         ON players(team_id);
 CREATE INDEX IF NOT EXISTS idx_standings_group      ON group_standings(group_name);
+CREATE INDEX IF NOT EXISTS idx_picks_competitor     ON picks(competitor_id);
+CREATE INDEX IF NOT EXISTS idx_picks_match          ON picks(match_id);

@@ -56,6 +56,21 @@ export function positionOrder(pos: string | null): number {
   return ({ GK: 0, DEF: 1, MID: 2, FWD: 3 }[pos ?? ''] ?? 4)
 }
 
+/**
+ * Compute age in whole years from an ISO date-of-birth string,
+ * accounting for whether the birthday has occurred this year.
+ * Returns null for missing / unparseable values.
+ */
+export function calculateAge(dob: string | null | undefined, asOf: Date = new Date()): number | null {
+  if (!dob) return null
+  const birth = new Date(dob)
+  if (isNaN(birth.getTime())) return null
+  let age = asOf.getFullYear() - birth.getFullYear()
+  const m = asOf.getMonth() - birth.getMonth()
+  if (m < 0 || (m === 0 && asOf.getDate() < birth.getDate())) age--
+  return age
+}
+
 export const EVENT_ICON: Record<string, string> = {
   goal:               '⚽',
   own_goal:           '⚽',

@@ -4,12 +4,13 @@ export interface Team {
   code: string
   group_name: string | null
   flag_url: string | null
+  world_rank: number | null
 }
 
 export interface Club {
   id: number
   name: string
-  country: string
+  country: string         // 3-letter code (e.g. 'ENG', 'ESP')
   league: string
 }
 
@@ -21,6 +22,7 @@ export interface Player {
   position: 'GK' | 'DEF' | 'MID' | 'FWD' | null
   date_of_birth: string | null
   club: Club | null
+  club_status: 'unattached' | 'unknown' | null
 }
 
 export interface MatchScore {
@@ -41,11 +43,11 @@ export interface MatchSummary {
   match_number: string | null
   scheduled_at: string
   status: string
-  home_team: Team
-  away_team: Team
+  home_team: Team | null      // null on knockout placeholder rows
+  away_team: Team | null
   score: MatchScore
   winner_id: number | null
-  venue: { id: number; name: string; city: string; country: string; capacity: number | null } | null
+  venue: { id: number; name: string; city: string; country: string; capacity: number | null; number_games: number | null } | null
 }
 
 export interface MatchEvent {
@@ -95,6 +97,8 @@ export interface PlayerMatchStats {
   tackles_made: number
   interceptions: number
   clearances: number
+  fouls_committed: number
+  fouls_won: number
   yellow_cards: number
   red_cards: number
   saves: number
@@ -124,6 +128,158 @@ export interface StandingRow {
 export interface GroupStandings {
   group_name: string
   rows: StandingRow[]
+}
+
+export interface PlayerTournamentTotals {
+  player: Player
+  apps: number
+  minutes_played: number
+  goals: number
+  assists: number
+  shots_total: number
+  shots_on_target: number
+  passes_completed: number
+  passes_attempted: number
+  tackles_made: number
+  fouls_committed: number
+  fouls_won: number
+  yellow_cards: number
+  red_cards: number
+  saves: number
+  goals_conceded: number
+}
+
+export interface LeaderboardRow {
+  player_id: number
+  player_name: string
+  shirt_number: number | null
+  position: 'GK' | 'DEF' | 'MID' | 'FWD' | null
+  team_id: number
+  team_name: string
+  team_code: string
+  flag_url: string | null
+  apps: number
+  minutes_played: number
+  goals: number
+  assists: number
+  shots_total: number
+  shots_on_target: number
+  passes_completed: number
+  passes_attempted: number
+  tackles_made: number
+  fouls_committed: number
+  fouls_won: number
+  yellow_cards: number
+  red_cards: number
+  saves: number
+  goals_conceded: number
+}
+
+export interface TeamDetail {
+  team: Team
+  standing: StandingRow | null
+  fixtures: MatchSummary[]
+  squad: PlayerTournamentTotals[]
+}
+
+// ---------------------------------------------------------------------------
+// Competition (family prediction game)
+// ---------------------------------------------------------------------------
+
+export interface ScoringConfig {
+  result_points: number
+  both_scores_points: number
+  one_score_points: number
+  first_scorer_points: number
+  joker_multiplier: number
+  pen_winner_bonus_goal: number
+  tournament_started: boolean
+}
+
+export interface CompetitorRow {
+  id: number
+  name: string
+  team_name: string
+  created_at: string
+  picks_made: number
+  total_points: number
+  jokers_played: number
+  matches_scored: number
+}
+
+export interface CompetitorDetail {
+  id: number
+  name: string
+  team_name: string
+  created_at: string
+  total_points: number
+  picks_made: number
+  jokers_used: Record<string, number>
+  joker_caps:  Record<string, number>
+}
+
+export interface PickRow {
+  match_id: number
+  stage: string
+  group_name: string | null
+  match_number: number | null
+  scheduled_at: string
+  status: string
+  ft_home: number | null
+  ft_away: number | null
+  et_home: number | null
+  et_away: number | null
+  pen_home: number | null
+  pen_away: number | null
+  winner_id: number | null
+  home_id: number | null
+  home_name: string | null
+  home_code: string | null
+  home_flag: string | null
+  away_id: number | null
+  away_name: string | null
+  away_code: string | null
+  away_flag: string | null
+  pick_id: number | null
+  pick_home: number | null
+  pick_away: number | null
+  first_scorer_player_id: number | null
+  first_scorer_name: string | null
+  no_goal: number | null
+  is_joker: number | null
+  points_awarded: number | null
+  joker_bucket: string
+  pick_hidden: boolean
+}
+
+export interface MatchPickRow {
+  competitor_id: number
+  competitor_name: string
+  team_name: string
+  home_score: number
+  away_score: number
+  first_scorer_player_id: number | null
+  first_scorer_name: string | null
+  no_goal: number
+  is_joker: number
+  points_awarded: number | null
+}
+
+export interface MatchPicksResponse {
+  match: {
+    id: number
+    status: string
+    stage: string
+    group_name: string | null
+    scheduled_at: string
+    ft_home: number | null
+    ft_away: number | null
+    et_home: number | null
+    et_away: number | null
+    pen_home: number | null
+    pen_away: number | null
+  }
+  picks: MatchPickRow[]
 }
 
 export interface BracketSlot {

@@ -49,7 +49,9 @@ if _USE_TURSO:
 
         async def execute(self, sql: str, params: list | tuple = ()) -> list[dict]:
             rs = await self._client.execute(sql, list(params))
-            cols = [c.name for c in rs.columns]
+            # Older libsql_client returns column objects with .name; newer
+            # versions return bare strings. Tolerate both.
+            cols = [getattr(c, "name", c) for c in rs.columns]
             return [dict(zip(cols, row)) for row in rs.rows]
 
         async def executemany(self, sql: str, param_list: list[list | tuple]):
@@ -57,8 +59,21 @@ if _USE_TURSO:
             await self._client.batch(stmts)
 
         async def execute_script(self, sql: str):
-            """Run a multi-statement SQL script (schema setup)."""
-            statements = [s.strip() for s in sql.split(";") if s.strip()]
+            """Run a multi-statement SQL script (schema setup).
+
+            Turso's parser rejects chunks that contain only SQL comments
+            (sqlite3.executescript tolerates them, but Turso doesn't).
+            Strip `-- ...` line comments first, then split on `;` and skip
+            any chunk that has no remaining SQL.
+            """
+            cleaned_lines: list[str] = []
+            for line in sql.splitlines():
+                idx = line.find("--")
+                if idx >= 0:
+                    line = line[:idx]
+                cleaned_lines.append(line)
+            cleaned = "\n".join(cleaned_lines)
+            statements = [s.strip() for s in cleaned.split(";") if s.strip()]
             stmts = [libsql_client.Statement(s) for s in statements]
             await self._client.batch(stmts)
 
@@ -118,9 +133,9 @@ else:
 # ---------------------------------------------------------------------------
 async def init_db():
     """Create all tables if they don't exist. Safe to call on every startup."""
-    schema_path = os.path.join(os.path.dirname(__file__), "..", "schema.sql")
+    schema_path = os.path.join(os.path.dirname(__file__), "..", "..", "schema.sql")
     with open(schema_path) as f:
         sql = f.read()
     async with get_db() as db:
         await db.execute_script(sql)
-    print(f"✓ Database initialised ({'Turso' if _USE_TURSO else 'SQLite'})")
+    print(f"[OK] Database initialised ({'Turso' if _USE_TURSO else 'SQLite'})")
