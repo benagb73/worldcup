@@ -1011,21 +1011,24 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
         <table className="w-full text-xs">
           <thead className="bg-black/20 text-[10px] font-bold tracking-widest text-cream/40">
             <tr>
+              {/* Portrait phone shows the at-a-glance derived snapshot only
+                  (MIN/G/A/Y/R). Landscape phone + tablets+ show the full
+                  editable form. Rotate your phone to enter the wider stats. */}
               <th className="px-2 py-2 text-left sticky left-0 z-10 bg-black/40 min-w-[160px]">PLAYER</th>
               <th className="px-1.5 py-2 text-center">MIN</th>
               <th className="px-1.5 py-2 text-center text-gold">G</th>
               <th className="px-1.5 py-2 text-center text-emerald-400">A</th>
               <th className="px-1.5 py-2 text-center">Y</th>
               <th className="px-1.5 py-2 text-center">R</th>
-              <th className="px-1.5 py-2 text-center">PC</th>
-              <th className="px-1.5 py-2 text-center">PA</th>
-              <th className="px-1.5 py-2 text-center">TKL</th>
-              <th className="px-1.5 py-2 text-center">F+</th>
-              <th className="px-1.5 py-2 text-center">F-</th>
-              <th className="px-1.5 py-2 text-center">SH</th>
-              <th className="px-1.5 py-2 text-center">SOT</th>
-              <th className="px-1.5 py-2 text-center text-amber-400">SV</th>
-              <th className="px-1.5 py-2 text-center text-live/80">GA</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">PC</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">PA</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">TKL</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">F+</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">F-</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">SH</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">SOT</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center text-amber-400">SV</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center text-live/80">GA</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
@@ -1061,16 +1064,17 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
                   <ReadCell value={r.yellow_cards} accent={r.yellow_cards > 0 ? 'amber' : undefined} />
                   <ReadCell value={r.red_cards}    accent={r.red_cards > 0 ? 'live' : undefined} />
 
-                  {/* Editable manual columns */}
-                  <StatCell value={r.passes_completed} onChange={v => setField(r.player_id, 'passes_completed', v)} />
-                  <StatCell value={r.passes_attempted} onChange={v => setField(r.player_id, 'passes_attempted', v)} />
-                  <StatCell value={r.tackles_made}     onChange={v => setField(r.player_id, 'tackles_made',     v)} />
-                  <StatCell value={r.fouls_won}        onChange={v => setField(r.player_id, 'fouls_won',        v)} />
-                  <StatCell value={r.fouls_committed}  onChange={v => setField(r.player_id, 'fouls_committed',  v)} />
-                  <StatCell value={r.shots_total}      onChange={v => setField(r.player_id, 'shots_total',      v)} />
-                  <StatCell value={r.shots_on_target}  onChange={v => setField(r.player_id, 'shots_on_target',  v)} />
-                  <StatCell value={r.saves}            onChange={v => setField(r.player_id, 'saves',            v)} dim={!isGK} />
-                  <StatCell value={r.goals_conceded}   onChange={v => setField(r.player_id, 'goals_conceded',   v)} dim={!isGK} />
+                  {/* Editable manual columns — hidden in portrait so the
+                      mobile snapshot stays at-a-glance. Rotate to edit. */}
+                  <StatCell value={r.passes_completed} onChange={v => setField(r.player_id, 'passes_completed', v)} hideOnPortrait />
+                  <StatCell value={r.passes_attempted} onChange={v => setField(r.player_id, 'passes_attempted', v)} hideOnPortrait />
+                  <StatCell value={r.tackles_made}     onChange={v => setField(r.player_id, 'tackles_made',     v)} hideOnPortrait />
+                  <StatCell value={r.fouls_won}        onChange={v => setField(r.player_id, 'fouls_won',        v)} hideOnPortrait />
+                  <StatCell value={r.fouls_committed}  onChange={v => setField(r.player_id, 'fouls_committed',  v)} hideOnPortrait />
+                  <StatCell value={r.shots_total}      onChange={v => setField(r.player_id, 'shots_total',      v)} hideOnPortrait />
+                  <StatCell value={r.shots_on_target}  onChange={v => setField(r.player_id, 'shots_on_target',  v)} hideOnPortrait />
+                  <StatCell value={r.saves}            onChange={v => setField(r.player_id, 'saves',            v)} dim={!isGK} hideOnPortrait />
+                  <StatCell value={r.goals_conceded}   onChange={v => setField(r.player_id, 'goals_conceded',   v)} dim={!isGK} hideOnPortrait />
                 </tr>
               )
             })}
@@ -1094,13 +1098,17 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
   )
 }
 
-function StatCell({ value, onChange, dim }: {
+function StatCell({ value, onChange, dim, hideOnPortrait }: {
   value: number
   onChange: (v: number) => void
   dim?: boolean
+  hideOnPortrait?: boolean
 }) {
   return (
-    <td className="px-1 py-1">
+    <td className={clsx(
+      'px-1 py-1',
+      hideOnPortrait && 'hidden landscape:table-cell sm:table-cell'
+    )}>
       <input
         type="number"
         min={0}
@@ -1115,9 +1123,10 @@ function StatCell({ value, onChange, dim }: {
   )
 }
 
-function ReadCell({ value, accent }: {
+function ReadCell({ value, accent, hideOnPortrait }: {
   value: number
   accent?: 'gold' | 'emerald' | 'amber' | 'live'
+  hideOnPortrait?: boolean
 }) {
   const cls = {
     gold: 'text-gold font-bold',
@@ -1128,6 +1137,7 @@ function ReadCell({ value, accent }: {
   return (
     <td className={clsx(
       'px-1.5 py-1.5 text-center font-mono text-xs tabular-nums',
+      hideOnPortrait && 'hidden landscape:table-cell sm:table-cell',
       accent ? cls[accent] : value === 0 ? 'text-cream/25' : 'text-cream/70'
     )}>
       {value}

@@ -23,6 +23,8 @@ interface ColumnDef {
   cellClass?: string
   // Eyebrow color for the header
   headerClass?: string
+  // Show on portrait phones? (default false — only the headline stats stay)
+  portrait?: boolean
 }
 
 // Derived percentages — return -1 if undefined so they sort last in desc
@@ -32,11 +34,11 @@ const shotAcc = (r: LeaderboardRow) =>
   r.shots_total > 0 ? (r.shots_on_target / r.shots_total) * 100 : -1
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'apps',          label: 'Apps',     short: 'APP',  numeric: true, defaultDir: 'desc', value: r => r.apps },
-  { key: 'minutes_played', label: 'Minutes',  short: 'MIN',  numeric: true, defaultDir: 'desc', value: r => r.minutes_played },
-  { key: 'goals',         label: 'Goals',    short: 'G',    numeric: true, defaultDir: 'desc', value: r => r.goals,
+  { key: 'apps',          label: 'Apps',     short: 'APP',  numeric: true, defaultDir: 'desc', value: r => r.apps,            portrait: true },
+  { key: 'minutes_played', label: 'Minutes',  short: 'MIN',  numeric: true, defaultDir: 'desc', value: r => r.minutes_played, portrait: true },
+  { key: 'goals',         label: 'Goals',    short: 'G',    numeric: true, defaultDir: 'desc', value: r => r.goals,            portrait: true,
     headerClass: 'text-gold' },
-  { key: 'assists',       label: 'Assists',  short: 'A',    numeric: true, defaultDir: 'desc', value: r => r.assists,
+  { key: 'assists',       label: 'Assists',  short: 'A',    numeric: true, defaultDir: 'desc', value: r => r.assists,          portrait: true,
     headerClass: 'text-emerald-400' },
   { key: 'shots_total',   label: 'Shots',    short: 'SH',   numeric: true, defaultDir: 'desc', value: r => r.shots_total },
   { key: 'shots_on_target', label: 'On Tgt', short: 'SOT',  numeric: true, defaultDir: 'desc', value: r => r.shots_on_target },
@@ -142,14 +144,22 @@ export default function LeaderboardPage() {
       ) : (
         <div className="overflow-hidden rounded-2xl border border-white/10 panel">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full text-sm landscape:min-w-[1100px] sm:min-w-[1100px]">
               <thead className="bg-black/30">
                 <tr className="text-[10px] font-bold tracking-widest text-cream/40">
                   <th className="px-3 py-2 text-left sticky left-0 z-10 bg-black/40">RANK</th>
                   <th className="px-3 py-2 text-left sticky left-12 z-10 bg-black/40 min-w-[200px]">PLAYER</th>
                   <th className="px-3 py-2 text-left">POS</th>
                   {COLUMNS.map(c => (
-                    <th key={c.key} className="px-2 py-2 text-center whitespace-nowrap">
+                    <th
+                      key={c.key}
+                      className={clsx(
+                        'px-2 py-2 text-center whitespace-nowrap',
+                        // Portrait phones see only the headline cols;
+                        // landscape phones + tablets+ see everything.
+                        !c.portrait && 'hidden landscape:table-cell sm:table-cell'
+                      )}
+                    >
                       <button
                         onClick={() => clickHeader(c)}
                         className={clsx(
@@ -223,6 +233,7 @@ function PlayerRow({ row, rank, sortKey }: { row: LeaderboardRow; rank: number; 
             key={c.key}
             className={clsx(
               'px-2 py-2 text-center font-mono text-xs tabular-nums whitespace-nowrap',
+              !c.portrait && 'hidden landscape:table-cell sm:table-cell',
               isActive ? 'text-amber-400 font-bold' :
               c.key === 'goals' && row.goals > 0 ? 'text-gold font-bold' :
               c.key === 'assists' && row.assists > 0 ? 'text-emerald-400 font-bold' :

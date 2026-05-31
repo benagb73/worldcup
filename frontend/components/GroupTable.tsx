@@ -19,16 +19,19 @@ export function GroupTable({ group }: { group: GroupStandings }) {
         </div>
       </div>
 
-      {/* Column header */}
-      <div className="grid grid-cols-[22px_1fr_repeat(4,minmax(0,22px))_minmax(0,32px)] items-center gap-1 border-b border-white/5 bg-white/[0.02] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-cream/40 sm:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))]">
+      {/* Column header
+          Portrait phone:  # Team P W D L Pts                 (7 cells)
+          Landscape phone / tablet+: # Team P W D L GF GA Pts (9 cells)
+       */}
+      <div className="grid grid-cols-[22px_1fr_repeat(5,minmax(0,22px))] items-center gap-1 border-b border-white/5 bg-white/[0.02] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-cream/40 landscape:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))] sm:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))]">
         <span className="text-center">#</span>
         <span>Team</span>
         <span className="text-center">P</span>
         <span className="text-center">W</span>
         <span className="text-center">D</span>
-        <span className="hidden text-center sm:block">L</span>
-        <span className="text-center">GF</span>
-        <span className="hidden text-center sm:block">GA</span>
+        <span className="text-center">L</span>
+        <span className="hidden text-center landscape:block sm:block">GF</span>
+        <span className="hidden text-center landscape:block sm:block">GA</span>
         <span className="text-center text-gold">PTS</span>
       </div>
 
@@ -57,7 +60,7 @@ function StandingRowItem({ row, rank }: { row: StandingRow; rank: number }) {
     <Link
       href={`/team/${row.team.id}`}
       className={clsx(
-        'group/row relative grid grid-cols-[22px_1fr_repeat(4,minmax(0,22px))_minmax(0,32px)] items-center gap-1 px-3 py-2.5 text-sm transition-colors sm:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))]',
+        'group/row relative grid grid-cols-[22px_1fr_repeat(5,minmax(0,22px))] items-center gap-1 px-3 py-2.5 text-sm transition-colors landscape:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))] sm:grid-cols-[28px_1fr_repeat(7,minmax(0,28px))]',
         'hover:bg-white/[0.04]',
         qualifies ? '' : 'opacity-75'
       )}
@@ -94,16 +97,13 @@ function StandingRowItem({ row, rank }: { row: StandingRow; rank: number }) {
         )}
       </div>
 
-      {/* Stats */}
+      {/* Stats — L always visible; GF/GA only in landscape or tablet+ */}
       <span className="text-center font-mono text-xs text-cream/60 tabular-nums">{row.played}</span>
       <span className="text-center font-mono text-xs text-cream/60 tabular-nums">{row.won}</span>
       <span className="text-center font-mono text-xs text-cream/60 tabular-nums">{row.drawn}</span>
-      <span className="hidden text-center font-mono text-xs text-cream/60 tabular-nums sm:block">{row.lost}</span>
-      <span className="text-center font-mono text-xs tabular-nums">
-        <span className="text-cream/60">{row.goals_for}</span>
-        <span className="text-cream/30 sm:hidden">:{row.goals_against}</span>
-      </span>
-      <span className="hidden text-center font-mono text-xs text-cream/60 tabular-nums sm:block">{row.goals_against}</span>
+      <span className="text-center font-mono text-xs text-cream/60 tabular-nums">{row.lost}</span>
+      <span className="hidden text-center font-mono text-xs text-cream/60 tabular-nums landscape:block sm:block">{row.goals_for}</span>
+      <span className="hidden text-center font-mono text-xs text-cream/60 tabular-nums landscape:block sm:block">{row.goals_against}</span>
       <span className="text-center font-mono text-sm font-black text-gold tabular-nums">{row.points}</span>
     </Link>
   )
