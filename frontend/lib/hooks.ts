@@ -94,3 +94,9 @@ export function useTeamRoster(teamId: number | string | null) {
     fetcher, { refreshInterval: STATIC_REFRESH }
   )
 }
+
+/** All rosters in one request — used by the pick page so we don't fire
+ *  one fetch per team. Returns `{ "<team_id>": Player[] }`. */
+export function useAllRosters() {
+  return useSWR(`${API}/api/rosters`, fetcher, { refreshInterval: STATIC_REFRESH })
+}

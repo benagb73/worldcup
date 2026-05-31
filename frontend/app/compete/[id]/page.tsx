@@ -4,7 +4,7 @@ import { use, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import clsx from 'clsx'
-import { useCompetitor, useCompetitorPicks, useTeamRoster, useScoringConfig } from '@/lib/hooks'
+import { useCompetitor, useCompetitorPicks, useAllRosters, useScoringConfig } from '@/lib/hooks'
 import { CompetitorDetail, PickRow, ScoringConfig } from '@/lib/types'
 import { competeFetch, CompeteError, BUCKET_LABEL, isOwner, markAsOwner } from '@/lib/compete'
 import { formatKickoff, stageName } from '@/lib/utils'
@@ -18,6 +18,8 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
   const { data: comp,    isLoading: lc, mutate: mutateComp }   = useCompetitor(id)
   const { data: picks,   isLoading: lp, mutate: mutatePicks }  = useCompetitorPicks(id)
   const { data: scoring }                                        = useScoringConfig()
+  // One batch fetch of every team's roster — way faster than 48 per-team requests
+  const { data: rosters } = useAllRosters()
 
   if (lc || lp) return <Skeleton />
   if (!comp)    return <div className="py-20 text-center text-cream/40">Competitor not found</div>
@@ -91,6 +93,7 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
                   competitorId={detail.id}
                   detail={detail}
                   scoring={scoring as ScoringConfig | undefined}
+                  rosters={rosters as Record<string, any[]> | undefined}
                   onSaved={refresh}
                 />
               ))}
@@ -160,11 +163,12 @@ function Hero({ detail }: { detail: CompetitorDetail }) {
 // Open pick card — editable
 // ---------------------------------------------------------------------------
 
-function PickCard({ pick, competitorId, detail, scoring, onSaved }: {
+function PickCard({ pick, competitorId, detail, scoring, rosters, onSaved }: {
   pick: PickRow
   competitorId: number
   detail: CompetitorDetail
   scoring?: ScoringConfig
+  rosters?: Record<string, Array<{ id: number; name: string; shirt_number: number | null; position: string | null }>>
   onSaved: () => Promise<void>
 }) {
   // Local draft state
@@ -186,8 +190,8 @@ function PickCard({ pick, competitorId, detail, scoring, onSaved }: {
     setJoker(pick.is_joker === 1)
   }, [pick.pick_home, pick.pick_away, pick.first_scorer_player_id, pick.no_goal, pick.is_joker])
 
-  const { data: homeRoster } = useTeamRoster(pick.home_id)
-  const { data: awayRoster } = useTeamRoster(pick.away_id)
+  const homeRoster = pick.home_id != null ? rosters?.[String(pick.home_id)] : undefined
+  const awayRoster = pick.away_id != null ? rosters?.[String(pick.away_id)] : undefined
 
   const bucket = pick.joker_bucket
   const cap    = detail.joker_caps[bucket] ?? 0

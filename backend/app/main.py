@@ -203,6 +203,33 @@ async def get_groups():
 # Team detail (roster + tournament totals + fixtures + standing)
 # ---------------------------------------------------------------------------
 
+@app.get("/api/rosters")
+async def get_all_rosters():
+    """Map of team_id → list of players. One round-trip for the whole
+    family-pool pick page so we don't fire one fetch per team.
+    """
+    async with get_db() as db:
+        rows = await db.fetchall("""
+            SELECT team_id, id, name, shirt_number, position
+            FROM players
+            ORDER BY team_id,
+              CASE position
+                WHEN 'GK' THEN 0 WHEN 'DEF' THEN 1
+                WHEN 'MID' THEN 2 WHEN 'FWD' THEN 3 ELSE 4
+              END,
+              COALESCE(shirt_number, 99), name
+        """)
+    out: dict[str, list] = {}
+    for r in rows:
+        out.setdefault(str(r["team_id"]), []).append({
+            "id":           r["id"],
+            "name":         r["name"],
+            "shirt_number": r["shirt_number"],
+            "position":     r["position"],
+        })
+    return out
+
+
 @app.get("/api/teams/{team_id}/roster")
 async def get_team_roster(team_id: int):
     """Lightweight public roster — used by the family-competition pick form."""
