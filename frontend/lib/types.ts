@@ -196,6 +196,29 @@ export interface ScoringConfig {
   tournament_started: boolean
 }
 
+export interface Pool {
+  id: number
+  slug: string
+  name: string
+  created_at: string
+  member_count: number
+}
+
+export interface PoolDetail {
+  id: number
+  slug: string
+  name: string
+  created_at: string
+  members: CompetitorRow[]
+}
+
+export interface PoolMembership {
+  id: number
+  slug: string
+  name: string
+  joined_at: string
+}
+
 export interface CompetitorRow {
   id: number
   name: string

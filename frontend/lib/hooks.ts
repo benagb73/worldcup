@@ -68,6 +68,18 @@ export function useCompetitors() {
   return useSWR(`${API}/api/compete/competitors`, fetcher, { refreshInterval: LIVE_REFRESH })
 }
 
+export function usePools() {
+  return useSWR(`${API}/api/compete/pools`, fetcher, { refreshInterval: LIVE_REFRESH })
+}
+
+export function usePool(slug: string) {
+  return useSWR(`${API}/api/compete/pools/${slug}`, fetcher, { refreshInterval: LIVE_REFRESH })
+}
+
+export function useCompetitorPools(id: number | string) {
+  return useSWR(`${API}/api/compete/competitors/${id}/pools`, fetcher, { refreshInterval: STATIC_REFRESH })
+}
+
 export function useCompetitor(id: number | string) {
   return useSWR(`${API}/api/compete/competitors/${id}`, fetcher, { refreshInterval: LIVE_REFRESH })
 }

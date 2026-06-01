@@ -256,6 +256,20 @@ class CompetitorIn(BaseModel):
     team_name: str = Field(min_length=1, max_length=40)
 
 
+class PoolIn(BaseModel):
+    slug: str = Field(min_length=1, max_length=40,
+                      pattern=r"^[a-z0-9][a-z0-9\-]*$")   # url-safe
+    name: str = Field(min_length=1, max_length=60)
+
+
+class PoolJoinIn(BaseModel):
+    """Either supply an existing competitor_id to add, OR new_name + new_team_name
+    to create a fresh competitor in this pool."""
+    competitor_id:  Optional[int] = None
+    new_name:       Optional[str] = None
+    new_team_name:  Optional[str] = None
+
+
 class PickIn(BaseModel):
     home_score:             int = Field(ge=0, le=20)
     away_score:             int = Field(ge=0, le=20)
@@ -274,6 +288,134 @@ async def get_scoring():
         c = await _scoring_config(db)
         started = await tournament_started(db)
     return {**c, "tournament_started": started}
+
+
+# ---------------------------------------------------------------------------
+# Pools
+# ---------------------------------------------------------------------------
+
+@router.get("/pools")
+async def list_pools():
+    """All pools with their member count + total points across members."""
+    async with get_db() as db:
+        rows = await db.fetchall("""
+            SELECT
+              po.id, po.slug, po.name, po.created_at,
+              COUNT(DISTINCT pm.competitor_id) AS member_count
+            FROM pools po
+            LEFT JOIN pool_members pm ON pm.pool_id = po.id
+            GROUP BY po.id
+            ORDER BY po.id
+        """)
+    return rows
+
+
+@router.get("/pools/{slug}")
+async def get_pool(slug: str):
+    """Pool detail + leaderboard (only members of this pool)."""
+    async with get_db() as db:
+        p = await db.fetchone(
+            "SELECT id, slug, name, created_at FROM pools WHERE slug = ?",
+            [slug]
+        )
+        if not p:
+            raise HTTPException(404, "Pool not found")
+
+        members = await db.fetchall("""
+            SELECT
+              c.id, c.name, c.team_name, c.created_at,
+              COUNT(pk.id)                       AS picks_made,
+              COALESCE(SUM(pk.points_awarded),0) AS total_points,
+              COUNT(CASE WHEN pk.is_joker = 1 THEN 1 END)             AS jokers_played,
+              COUNT(CASE WHEN pk.points_awarded IS NOT NULL THEN 1 END) AS matches_scored
+            FROM pool_members pm
+            JOIN competitors c ON c.id = pm.competitor_id
+            LEFT JOIN picks pk ON pk.competitor_id = c.id
+            WHERE pm.pool_id = ?
+            GROUP BY c.id
+            ORDER BY total_points DESC, c.name
+        """, [p["id"]])
+    return {**p, "members": members}
+
+
+@router.post("/pools")
+async def create_pool(body: PoolIn):
+    slug = body.slug.strip().lower()
+    name = body.name.strip()
+    async with get_db() as db:
+        existing = await db.fetchone("SELECT id FROM pools WHERE slug = ?", [slug])
+        if existing:
+            raise HTTPException(409, f"Pool slug '{slug}' is already taken")
+        rows = await db.execute(
+            "INSERT INTO pools (slug, name) VALUES (?, ?) RETURNING id",
+            [slug, name]
+        )
+    return {"ok": True, "id": rows[0]["id"] if rows else None, "slug": slug}
+
+
+@router.post("/pools/{slug}/members")
+async def join_pool(slug: str, body: PoolJoinIn):
+    """Add an existing competitor to a pool, OR create a new competitor and
+    add them in one shot.
+
+    Body shapes:
+      {"competitor_id": 5}                                 ← add existing
+      {"new_name": "Sam", "new_team_name": "Sam's Side"}   ← create + add
+    """
+    async with get_db() as db:
+        pool = await db.fetchone("SELECT id FROM pools WHERE slug = ?", [slug])
+        if not pool:
+            raise HTTPException(404, "Pool not found")
+
+        competitor_id: int
+        if body.competitor_id is not None:
+            comp = await db.fetchone(
+                "SELECT id FROM competitors WHERE id = ?", [body.competitor_id]
+            )
+            if not comp:
+                raise HTTPException(404, "Competitor not found")
+            competitor_id = body.competitor_id
+        else:
+            if not body.new_name or not body.new_team_name:
+                raise HTTPException(400,
+                    "Provide either competitor_id or both new_name + new_team_name")
+            taken = await db.fetchone(
+                "SELECT id FROM competitors WHERE LOWER(team_name) = LOWER(?)",
+                [body.new_team_name.strip()]
+            )
+            if taken:
+                raise HTTPException(409,
+                    f"Team name '{body.new_team_name}' is already taken")
+            rows = await db.execute(
+                "INSERT INTO competitors (name, team_name) VALUES (?,?) RETURNING id",
+                [body.new_name.strip(), body.new_team_name.strip()]
+            )
+            competitor_id = rows[0]["id"] if rows else 0
+
+        # Idempotent — re-joining the same pool is harmless
+        await db.execute("""
+            INSERT OR IGNORE INTO pool_members (pool_id, competitor_id)
+            VALUES (?, ?)
+        """, [pool["id"], competitor_id])
+    return {"ok": True, "competitor_id": competitor_id}
+
+
+@router.get("/competitors/{competitor_id}/pools")
+async def competitor_pools(competitor_id: int):
+    """All pools this competitor is in — used by the competitor page to
+    show "Joined pools" + offer a "Join another" form."""
+    async with get_db() as db:
+        comp = await db.fetchone("SELECT id FROM competitors WHERE id = ?", [competitor_id])
+        if not comp:
+            raise HTTPException(404, "Competitor not found")
+        rows = await db.fetchall("""
+            SELECT po.id, po.slug, po.name, pm.joined_at
+            FROM pool_members pm
+            JOIN pools po ON po.id = pm.pool_id
+            WHERE pm.competitor_id = ?
+            ORDER BY pm.joined_at
+        """, [competitor_id])
+    return rows
 
 
 @router.get("/competitors")
@@ -309,6 +451,13 @@ async def create_competitor(body: CompetitorIn):
             [body.name.strip(), body.team_name.strip()]
         )
         new_id = rows[0]["id"] if rows else None
+        # Auto-add to the default Family pool so legacy /compete/join flow keeps working
+        if new_id is not None:
+            await db.execute(
+                "INSERT OR IGNORE INTO pool_members (pool_id, competitor_id) "
+                "SELECT id, ? FROM pools WHERE slug = 'family'",
+                [new_id]
+            )
     return {"ok": True, "id": new_id}
 
 

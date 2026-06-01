@@ -1,12 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { competeFetch, CompeteError, markAsOwner } from '@/lib/compete'
 
+// Legacy URL — redirects to the per-pool join flow for the default Family pool.
+// New visitors should be directed to /pool/<slug>/join going forward.
 export default function JoinPage() {
   const router = useRouter()
+  useEffect(() => { router.replace('/pool/family/join') }, [router])
   const [name, setName]         = useState('')
   const [teamName, setTeamName] = useState('')
   const [busy, setBusy]         = useState(false)

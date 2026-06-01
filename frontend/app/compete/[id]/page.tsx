@@ -4,7 +4,8 @@ import { use, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import clsx from 'clsx'
-import { useCompetitor, useCompetitorPicks, useAllRosters, useScoringConfig } from '@/lib/hooks'
+import { useCompetitor, useCompetitorPicks, useAllRosters, useScoringConfig, useCompetitorPools } from '@/lib/hooks'
+import { PoolMembership } from '@/lib/types'
 import { CompetitorDetail, PickRow, ScoringConfig } from '@/lib/types'
 import { competeFetch, CompeteError, BUCKET_LABEL, isOwner, markAsOwner } from '@/lib/compete'
 import { formatKickoff, stageName } from '@/lib/utils'
@@ -20,6 +21,8 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
   const { data: scoring }                                        = useScoringConfig()
   // One batch fetch of every team's roster — way faster than 48 per-team requests
   const { data: rosters } = useAllRosters()
+  // Which pools this competitor is in
+  const { data: pools } = useCompetitorPools(id)
 
   if (lc || lp) return <Skeleton />
   if (!comp)    return <div className="py-20 text-center text-cream/40">Competitor not found</div>
@@ -58,6 +61,8 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
       </Link>
 
       <Hero detail={detail} />
+
+      <JoinedPools pools={(pools as PoolMembership[] | undefined) ?? []} owner={owner} />
 
       {!owner && (
         <div className="rounded-2xl border border-amber-400/30 bg-amber-500/[0.04] px-5 py-4 flex flex-wrap items-center justify-between gap-3">
@@ -542,5 +547,49 @@ function Skeleton() {
       <div className="h-32 rounded-2xl shimmer" />
       <div className="h-32 rounded-2xl shimmer" />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Joined-pools summary + "Join another" form
+// ---------------------------------------------------------------------------
+
+function JoinedPools({ pools, owner }: { pools: PoolMembership[]; owner: boolean }) {
+  if (!pools.length && !owner) return null
+  return (
+    <section className="rounded-2xl border border-white/10 panel p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">JOINED POOLS</div>
+          <h2 className="font-display text-xl tracking-wide text-cream">
+            {pools.length === 0
+              ? 'Not in any pools yet'
+              : pools.length === 1 ? '1 pool' : `${pools.length} pools`}
+          </h2>
+        </div>
+        {owner && (
+          <Link
+            href="/compete"
+            className="rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold tracking-widest text-amber-400 hover:bg-amber-500/20"
+          >
+            + JOIN ANOTHER
+          </Link>
+        )}
+      </div>
+
+      {pools.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {pools.map(p => (
+            <Link
+              key={p.id}
+              href={`/pool/${p.slug}`}
+              className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-bold text-cream/70 hover:border-amber-400/40 hover:text-cream"
+            >
+              {p.name}
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

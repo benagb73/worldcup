@@ -264,6 +264,34 @@ CREATE TABLE IF NOT EXISTS comp_scoring (
 INSERT OR IGNORE INTO comp_scoring (id) VALUES (1);
 
 -- ------------------------------------------------------------
+-- POOLS — competitors can be grouped into multiple pools.
+-- Picks are global to a competitor; pool membership controls which
+-- leaderboards their points appear on.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pools (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug        TEXT NOT NULL UNIQUE,            -- url-safe identifier, e.g. 'family', 'sams-friends'
+  name        TEXT NOT NULL,                   -- display name
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pool_members (
+  pool_id        INTEGER NOT NULL REFERENCES pools(id) ON DELETE CASCADE,
+  competitor_id  INTEGER NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+  joined_at      TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (pool_id, competitor_id)
+);
+
+-- Default family pool exists on first init so the original /compete UX
+-- keeps working after the multi-pool feature lands.
+INSERT OR IGNORE INTO pools (id, slug, name) VALUES (1, 'family', 'Family');
+
+-- Backfill: every existing competitor joins the family pool automatically.
+-- (No-op on first init when there are no competitors yet.)
+INSERT OR IGNORE INTO pool_members (pool_id, competitor_id)
+  SELECT 1, id FROM competitors;
+
+-- ------------------------------------------------------------
 -- INDEXES
 -- ------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_matches_stage        ON matches(stage);
@@ -280,3 +308,5 @@ CREATE INDEX IF NOT EXISTS idx_players_team         ON players(team_id);
 CREATE INDEX IF NOT EXISTS idx_standings_group      ON group_standings(group_name);
 CREATE INDEX IF NOT EXISTS idx_picks_competitor     ON picks(competitor_id);
 CREATE INDEX IF NOT EXISTS idx_picks_match          ON picks(match_id);
+CREATE INDEX IF NOT EXISTS idx_pool_members_pool       ON pool_members(pool_id);
+CREATE INDEX IF NOT EXISTS idx_pool_members_competitor ON pool_members(competitor_id);
