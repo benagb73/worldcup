@@ -12,11 +12,12 @@ primary_region = "iad"            # ← e.g. iad (Virginia), lhr (London). Pick 
 [http_service]
   internal_port = 8000
   force_https = true
-  # Free tier: stop machine when idle, wake on first request.
-  # Adds ~2s cold-start latency. Set to "off" for a paid always-on machine.
-  auto_stop_machines = "stop"
+  # Keep one machine always running so visitors never hit a cold start.
+  # Costs ~$1.94/mo on shared-cpu-1x. Set min_machines_running=0 + auto_stop_machines="stop"
+  # to save that and accept a 2-3s delay on first request after idle.
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
   [[http_service.checks]]
     interval     = "30s"

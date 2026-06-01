@@ -58,6 +58,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Tiny middleware: tag GET responses on public read-only endpoints with a short
+# Cache-Control so browsers / Vercel's edge can serve repeat hits without
+# round-tripping to the backend. SWR's 60s polling refreshes data anyway.
+@app.middleware("http")
+async def add_cache_headers(request, call_next):
+    response = await call_next(request)
+    if request.method != "GET":
+        return response
+    path = request.url.path
+    # Only cache the high-traffic, idempotent read endpoints
+    cacheable_prefixes = (
+        "/api/groups", "/api/matches", "/api/teams", "/api/players",
+        "/api/bracket", "/api/leaderboard", "/api/rosters",
+    )
+    # Don't cache admin or compete (per-user) or pick details
+    if path.startswith("/api/admin") or path.startswith("/api/compete"):
+        return response
+    if any(path.startswith(p) for p in cacheable_prefixes):
+        # 30s fresh, then 60s stale-while-revalidate so users still see
+        # cached UI while a fresh fetch happens in the background.
+        response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=60"
+    return response
+
 # Hidden admin router — gated by X-Admin-Secret header inside the module
 from app.api.admin import router as admin_router  # noqa: E402
 app.include_router(admin_router)
