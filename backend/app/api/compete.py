@@ -57,36 +57,53 @@ JOKER_CAPS = {
 }
 
 
-async def _bucket_for_match(db, match_id: int) -> str:
-    """Return the joker-bucket identifier for a given match.
+async def _build_bucket_map(db) -> dict[int, str]:
+    """Compute every match's joker bucket in ONE query.
 
-    Group-stage matchday is derived from the chronological order of fixtures
-    within the same group (each team plays 3 games → 6 fixtures per group,
-    split into 3 matchdays of 2 games each).
+    Returns {match_id: bucket}. Group matchday is derived in Python from the
+    chronological order within each group (each team plays 3 games → 6 fixtures
+    per group, split into 3 matchdays of 2 games each).
+
+    Endpoints that need a bucket for one match should call this once at the
+    top of the request and look up in the resulting dict — avoids the
+    per-match query that previously triggered an N+1 (200+ Turso round trips
+    on the picks page).
     """
-    m = await db.fetchone(
-        "SELECT id, stage, group_name, scheduled_at FROM matches WHERE id = ?",
-        [match_id]
+    rows = await db.fetchall(
+        "SELECT id, stage, group_name, scheduled_at FROM matches "
+        "ORDER BY group_name, scheduled_at, id"
     )
-    if not m:
+    # Index group-stage matches by group letter in chronological order
+    group_lists: dict[str, list[int]] = {}
+    for m in rows:
+        if m["stage"] == "group" and m["group_name"]:
+            group_lists.setdefault(m["group_name"], []).append(m["id"])
+
+    out: dict[int, str] = {}
+    for m in rows:
+        mid = m["id"]
+        if m["stage"] != "group":
+            out[mid] = m["stage"]               # 'r32', 'r16', 'qf', 'sf', etc.
+            continue
+        gn = m["group_name"]
+        if not gn:
+            out[mid] = "group-1"                 # shouldn't happen with real data
+            continue
+        try:
+            idx = group_lists[gn].index(mid)
+        except ValueError:
+            idx = 0
+        out[mid] = f"group-{(idx // 2) + 1}"     # 1, 2, or 3
+    return out
+
+
+async def _bucket_for_match(db, match_id: int) -> str:
+    """Single-match version — only used by the PUT pick endpoint where we
+    need just one lookup. Internally builds the full map (still one query)."""
+    bmap = await _build_bucket_map(db)
+    if match_id not in bmap:
         raise HTTPException(404, "Match not found")
-    if m["stage"] != "group":
-        return m["stage"]  # 'r32', 'r16', 'qf', 'sf', 'third_place', 'final'
-
-    if not m["group_name"]:
-        return "group-1"  # fall back; shouldn't happen with real data
-
-    siblings = await db.fetchall(
-        "SELECT id FROM matches WHERE group_name = ? AND stage = 'group' "
-        "ORDER BY scheduled_at, id",
-        [m["group_name"]]
-    )
-    try:
-        idx = next(i for i, r in enumerate(siblings) if r["id"] == m["id"])
-    except StopIteration:
-        idx = 0
-    matchday = (idx // 2) + 1   # 1, 2, or 3
-    return f"group-{matchday}"
+    return bmap[match_id]
 
 
 # ---------------------------------------------------------------------------
@@ -315,11 +332,13 @@ async def get_competitor(competitor_id: int):
         """, [competitor_id])
 
         jokers_used: dict[str, int] = {k: 0 for k in JOKER_CAPS}
-        for p in picks:
-            if not p["is_joker"]:
-                continue
-            bucket = await _bucket_for_match(db, p["match_id"])
-            jokers_used[bucket] = jokers_used.get(bucket, 0) + 1
+        if any(p["is_joker"] for p in picks):
+            bmap = await _build_bucket_map(db)
+            for p in picks:
+                if not p["is_joker"]:
+                    continue
+                bucket = bmap.get(p["match_id"], "group-1")
+                jokers_used[bucket] = jokers_used.get(bucket, 0) + 1
 
         total_points = sum((p["points_awarded"] or 0) for p in picks)
     return {
@@ -379,10 +398,11 @@ async def list_picks(
 
         # Tag each row with its joker bucket so the UI can render caps.
         # When viewer is not the owner, scrub pick details for pre-kickoff matches.
+        bmap = await _build_bucket_map(db)        # ← one query instead of N
         now = datetime.now(timezone.utc)
         out = []
         for r in rows:
-            bucket = await _bucket_for_match(db, r["match_id"])
+            bucket = bmap.get(r["match_id"], "group-1")
             row = {**r, "joker_bucket": bucket}
             if not is_owner:
                 try:
@@ -447,22 +467,20 @@ async def upsert_pick(competitor_id: int, match_id: int, body: PickIn):
 
         # Joker validation
         if body.is_joker:
-            bucket = await _bucket_for_match(db, match_id)
+            bmap = await _build_bucket_map(db)
+            bucket = bmap.get(match_id)
+            if bucket is None:
+                raise HTTPException(404, "Match not found")
             cap = JOKER_CAPS.get(bucket, 0)
             if cap == 0:
                 raise HTTPException(400, f"No jokers allowed for {bucket} matches")
 
-            # Count current jokers in this bucket (excluding this match)
+            # Count current jokers already used in this bucket (excluding this match)
             used_rows = await db.fetchall("""
                 SELECT p.match_id FROM picks p
-                JOIN matches m ON m.id = p.match_id
                 WHERE p.competitor_id = ? AND p.is_joker = 1 AND p.match_id != ?
             """, [competitor_id, match_id])
-            in_bucket = 0
-            for r in used_rows:
-                b = await _bucket_for_match(db, r["match_id"])
-                if b == bucket:
-                    in_bucket += 1
+            in_bucket = sum(1 for r in used_rows if bmap.get(r["match_id"]) == bucket)
             if in_bucket >= cap:
                 raise HTTPException(409,
                     f"Joker limit reached for {bucket} ({in_bucket}/{cap})")
