@@ -183,11 +183,11 @@ function PickCard({ pick, competitorId, detail, scoring, rosters, onSaved }: {
     pick.no_goal === 1 ? 'none' : (pick.first_scorer_player_id ?? '')
   )
   const [joker, setJoker] = useState<boolean>(pick.is_joker === 1)
-  const [busy, setBusy] = useState(false)
   const [err, setErr]   = useState<string | null>(null)
-  const [flash, setFlash] = useState<string | null>(null)
+  type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+  const [saveState, setSaveState] = useState<SaveState>('idle')
 
-  // Reset when upstream changes (e.g. after save)
+  // Reset when upstream changes (e.g. after save / refresh from server)
   useEffect(() => {
     setHome(pick.pick_home ?? 0)
     setAway(pick.pick_away ?? 0)
@@ -205,29 +205,47 @@ function PickCard({ pick, competitorId, detail, scoring, rosters, onSaved }: {
   const usedExcluding = used - (pick.is_joker === 1 ? 1 : 0)
   const jokerDisabled = cap === 0 || (usedExcluding >= cap && !pick.is_joker)
 
-  async function save() {
-    setBusy(true)
-    setErr(null)
-    try {
-      await competeFetch(`/competitors/${competitorId}/picks/${pick.match_id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          home_score: home,
-          away_score: away,
-          first_scorer_player_id: scorer === 'none' || scorer === '' ? null : Number(scorer),
-          no_goal:  scorer === 'none',
-          is_joker: joker,
-        }),
-      })
-      setFlash('Saved ✓')
-      setTimeout(() => setFlash(null), 1500)
-      await onSaved()
-    } catch (e) {
-      setErr(e instanceof CompeteError ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
+  // ---- Auto-save: dirty diff vs server, debounced 700ms after last edit
+  const isDirty =
+       home   !== (pick.pick_home ?? 0)
+    || away   !== (pick.pick_away ?? 0)
+    || joker  !== (pick.is_joker === 1)
+    || (scorer === 'none'
+          ? pick.no_goal !== 1
+          : scorer === ''
+            ? false                                                   // never auto-save with no scorer chosen
+            : Number(scorer) !== pick.first_scorer_player_id)
+
+  useEffect(() => {
+    if (!isDirty) return
+    if (scorer === '') return   // require a scorer pick before any save
+
+    const handle = setTimeout(async () => {
+      setSaveState('saving')
+      setErr(null)
+      try {
+        await competeFetch(`/competitors/${competitorId}/picks/${pick.match_id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            home_score: home,
+            away_score: away,
+            first_scorer_player_id: typeof scorer === 'number' ? scorer : null,
+            no_goal:  scorer === 'none',
+            is_joker: joker,
+          }),
+        })
+        setSaveState('saved')
+        setTimeout(() => setSaveState(prev => prev === 'saved' ? 'idle' : prev), 1500)
+        await onSaved()
+      } catch (e) {
+        setErr(e instanceof CompeteError ? e.message : String(e))
+        setSaveState('error')
+      }
+    }, 700)
+
+    return () => clearTimeout(handle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [home, away, scorer, joker, isDirty])
 
   return (
     <div className={clsx(
@@ -342,15 +360,11 @@ function PickCard({ pick, competitorId, detail, scoring, rosters, onSaved }: {
 
       <div className="mt-4 flex items-center justify-between gap-3">
         <span className="text-[10px] text-cream/40">
-          {flash ?? (pick.pick_id ? 'You can update this pick until kickoff.' : 'No pick saved yet.')}
+          {scorer === '' && !pick.pick_id
+            ? 'Pick a first scorer to save — auto-saves after that.'
+            : 'Picks auto-save as you change them. Lock at kickoff.'}
         </span>
-        <button
-          onClick={save}
-          disabled={busy || (scorer === '')}
-          className="rounded-lg bg-gold-gradient px-4 py-2 text-xs font-bold tracking-widest text-ink shadow-gold disabled:opacity-50"
-        >
-          {busy ? 'SAVING…' : pick.pick_id ? 'UPDATE PICK' : 'SAVE PICK'}
-        </button>
+        <SaveStatus state={saveState} dirty={isDirty} hasPick={pick.pick_id != null} />
       </div>
 
       <style jsx>{`
@@ -369,6 +383,44 @@ function PickCard({ pick, competitorId, detail, scoring, rosters, onSaved }: {
         }
       `}</style>
     </div>
+  )
+}
+
+function SaveStatus({ state, dirty, hasPick }: {
+  state: 'idle' | 'saving' | 'saved' | 'error'
+  dirty: boolean
+  hasPick: boolean
+}) {
+  if (state === 'saving') return <Pill color="amber" dot>SAVING…</Pill>
+  if (state === 'saved')  return <Pill color="emerald" dot>SAVED ✓</Pill>
+  if (state === 'error')  return <Pill color="live" dot>SAVE FAILED — RETRYING</Pill>
+  if (dirty)              return <Pill color="amber">PENDING…</Pill>
+  if (hasPick)            return <Pill color="cream">SAVED</Pill>
+  return <Pill color="cream-faint">NO PICK YET</Pill>
+}
+
+function Pill({ color, dot, children }: {
+  color: 'amber' | 'emerald' | 'live' | 'cream' | 'cream-faint'
+  dot?: boolean
+  children: React.ReactNode
+}) {
+  const cls = {
+    amber:        'bg-amber-500/15 text-amber-400 border-amber-400/30',
+    emerald:      'bg-emerald-500/15 text-emerald-400 border-emerald-400/30',
+    live:         'bg-live/15 text-live border-live/30',
+    cream:        'bg-white/5 text-cream/60 border-white/10',
+    'cream-faint':'bg-white/[0.03] text-cream/30 border-white/5',
+  }[color]
+  return (
+    <span className={clsx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-widest', cls)}>
+      {dot && <span className={clsx(
+        'h-1.5 w-1.5 rounded-full',
+        color === 'amber'   ? 'bg-amber-400 animate-pulse' :
+        color === 'emerald' ? 'bg-emerald-400' :
+        color === 'live'    ? 'bg-live' : 'bg-cream'
+      )} />}
+      {children}
+    </span>
   )
 }
 
