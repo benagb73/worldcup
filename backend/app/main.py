@@ -275,7 +275,8 @@ async def get_team_roster(team_id: int):
 async def get_team(team_id: int):
     async with get_db() as db:
         team_row = await db.fetchone(
-            "SELECT id, name, code, group_name, flag_url, world_rank FROM teams WHERE id = ?",
+            "SELECT id, name, code, group_name, flag_url, world_rank, manager "
+            "FROM teams WHERE id = ?",
             [team_id]
         )
         if not team_row:
@@ -284,6 +285,7 @@ async def get_team(team_id: int):
             id=team_row["id"], name=team_row["name"], code=team_row["code"],
             group_name=team_row.get("group_name"), flag_url=team_row.get("flag_url"),
             world_rank=team_row.get("world_rank"),
+            manager=team_row.get("manager"),
         )
 
         # Group standing — None for knockout-only teams (no group_name)
@@ -313,6 +315,7 @@ async def get_team(team_id: int):
         # Roster + aggregated tournament totals
         roster_rows = await db.fetchall("""
             SELECT p.id, p.name, p.shirt_number, p.position, p.date_of_birth, p.club_status,
+                   p.intl_caps_pre, p.intl_goals_pre,
                    c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague
             FROM players p
             LEFT JOIN clubs c ON p.club_id = c.id
@@ -353,6 +356,10 @@ async def get_team(team_id: int):
         for pr in roster_rows:
             club = Club(id=pr["cid"], name=pr["cname"], country=pr["ccountry"],
                         league=pr["cleague"]) if pr.get("cid") else None
+            # Live international totals = pre-tournament base + tournament contributions
+            t = totals_by_pid.get(pr["id"], {})
+            tour_apps  = sum(1 for s in stat_rows
+                             if s["player_id"] == pr["id"] and (s["minutes_played"] or 0) > 0)
             player = Player(
                 id=pr["id"], team_id=team_id, name=pr["name"],
                 shirt_number=pr.get("shirt_number"),
@@ -360,6 +367,8 @@ async def get_team(team_id: int):
                 date_of_birth=pr.get("date_of_birth"),
                 club=club,
                 club_status=pr.get("club_status"),
+                intl_caps  = (pr.get("intl_caps_pre")  or 0) + tour_apps,
+                intl_goals = (pr.get("intl_goals_pre") or 0) + (t.get("goals", 0) or 0),
             )
             t = totals_by_pid.get(pr["id"], {})
             squad.append(PlayerTournamentTotals(
@@ -568,8 +577,15 @@ async def get_match(match_id: int):
 @app.get("/api/players/{player_id}", response_model=Player)
 async def get_player(player_id: int):
     async with get_db() as db:
+        # Single combined query: player + club + tournament aggregates
         row = await db.fetchone("""
-            SELECT p.*, c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague
+            SELECT
+              p.*,
+              c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague,
+              (SELECT COUNT(*) FROM player_match_stats pms
+                 WHERE pms.player_id = p.id AND pms.minutes_played > 0) AS tour_apps,
+              (SELECT COALESCE(SUM(goals), 0) FROM player_match_stats pms
+                 WHERE pms.player_id = p.id) AS tour_goals
             FROM players p
             LEFT JOIN clubs c ON p.club_id = c.id
             WHERE p.id = ?
@@ -578,10 +594,16 @@ async def get_player(player_id: int):
         raise HTTPException(404, "Player not found")
     club = Club(id=row["cid"], name=row["cname"], country=row["ccountry"],
                 league=row["cleague"]) if row.get("cid") else None
-    return Player(id=row["id"], team_id=row["team_id"], name=row["name"],
-                  shirt_number=row.get("shirt_number"), position=row.get("position"),
-                  date_of_birth=row.get("date_of_birth"), club=club,
-                  club_status=row.get("club_status"))
+    pre_caps  = row.get("intl_caps_pre")  or 0
+    pre_goals = row.get("intl_goals_pre") or 0
+    return Player(
+        id=row["id"], team_id=row["team_id"], name=row["name"],
+        shirt_number=row.get("shirt_number"), position=row.get("position"),
+        date_of_birth=row.get("date_of_birth"), club=club,
+        club_status=row.get("club_status"),
+        intl_caps  = pre_caps  + (row.get("tour_apps")  or 0),
+        intl_goals = pre_goals + (row.get("tour_goals") or 0),
+    )
 
 
 @app.get("/api/players/{player_id}/stats", response_model=list[PlayerMatchStats])

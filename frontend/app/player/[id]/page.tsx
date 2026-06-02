@@ -130,6 +130,17 @@ export default function PlayerPage({ params }: { params: Promise<{ id: string }>
           </div>
         </div>
 
+        {/* International career totals (pre-tournament base + live tournament contributions) */}
+        {(player.intl_caps != null || player.intl_goals != null) && (
+          <div className="relative border-t border-white/5 bg-black/20 px-6 py-5 sm:px-10">
+            <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400 mb-3">INTERNATIONAL CAREER</div>
+            <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+              <StatBox label="Caps"  value={player.intl_caps ?? 0} />
+              <StatBox label="Goals" value={player.intl_goals ?? 0} highlight={(player.intl_goals ?? 0) > 0} />
+            </div>
+          </div>
+        )}
+
         {/* Tournament stat grid — position-aware layout */}
         <div className="relative border-t border-white/5 bg-black/30 px-6 py-6 sm:px-10">
           <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400 mb-4">TOURNAMENT TOTALS</div>

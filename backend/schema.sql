@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS teams (
   group_name  TEXT,                   -- 'A'..'L' (WC 2026 has 12 groups), NULL otherwise
   flag_url    TEXT,
   world_rank  INTEGER,                -- FIFA world ranking at time of seeding
+  manager     TEXT,                   -- head coach name (synced from Wikipedia)
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
@@ -40,6 +41,10 @@ CREATE TABLE IF NOT EXISTS players (
   position      TEXT CHECK(position IN ('GK','DEF','MID','FWD')),
   date_of_birth TEXT,
   club_status   TEXT,                 -- 'unattached' / 'unknown' when club_id is NULL
+  -- International caps + goals BEFORE the tournament (from Wikipedia sync).
+  -- The API serves a live total: pre + tournament contributions.
+  intl_caps_pre  INTEGER DEFAULT 0,
+  intl_goals_pre INTEGER DEFAULT 0,
   created_at    TEXT DEFAULT (datetime('now'))
 );
 

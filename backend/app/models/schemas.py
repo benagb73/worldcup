@@ -19,6 +19,7 @@ class Team(BaseModel):
     group_name: Optional[str]
     flag_url: Optional[str]
     world_rank: Optional[int] = None
+    manager: Optional[str] = None
 
 
 class Club(BaseModel):
@@ -37,6 +38,9 @@ class Player(BaseModel):
     date_of_birth: Optional[str]
     club: Optional[Club]
     club_status: Optional[str] = None   # 'unattached' / 'unknown' / None
+    # Live international totals: pre-tournament value + tournament contributions
+    intl_caps: Optional[int] = None
+    intl_goals: Optional[int] = None
 
 
 class Venue(BaseModel):

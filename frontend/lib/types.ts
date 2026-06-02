@@ -5,6 +5,7 @@ export interface Team {
   group_name: string | null
   flag_url: string | null
   world_rank: number | null
+  manager?: string | null
 }
 
 export interface Club {
@@ -23,6 +24,8 @@ export interface Player {
   date_of_birth: string | null
   club: Club | null
   club_status: 'unattached' | 'unknown' | null
+  intl_caps?: number | null
+  intl_goals?: number | null
 }
 
 export interface MatchScore {

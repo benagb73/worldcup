@@ -1,0 +1,3 @@
+python -m scripts.sync_from_wikipedia              # dry run, prints diff
+python -m scripts.sync_from_wikipedia --apply      # commits changes
+python -m scripts.sync_from_wikipedia --html-file local.html   # test offline

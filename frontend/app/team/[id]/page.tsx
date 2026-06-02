@@ -147,6 +147,11 @@ function TeamHero({ team, standing }: { team: TeamDetail['team']; standing: Team
                   FIFA #{team.world_rank}
                 </span>
               )}
+              {team.manager && (
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] font-bold tracking-widest text-cream/60">
+                  COACH · {team.manager.toUpperCase()}
+                </span>
+              )}
             </div>
           </div>
         </div>

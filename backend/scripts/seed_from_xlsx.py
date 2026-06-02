@@ -269,9 +269,12 @@ async def import_workbook(xlsx_path: Path) -> None:
     print(f"\n[3/3] Writing rows")
     async with get_db() as db:
 
-        # Wipe everything in FK-safe order
+        # Wipe everything in FK-safe order (children first, parents last).
+        # `picks` references both players AND matches, so it must go before either.
+        # competitors / pools / pool_members / comp_scoring are user data — preserved.
         print("      Clearing existing data...")
-        for table in ["player_match_stats", "match_lineups", "match_events",
+        for table in ["picks",
+                      "player_match_stats", "match_lineups", "match_events",
                       "bracket", "group_standings", "matches",
                       "players", "teams", "venues", "clubs"]:
             await db.execute(f"DELETE FROM {table}")
