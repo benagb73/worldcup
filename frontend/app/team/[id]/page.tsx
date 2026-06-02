@@ -132,27 +132,25 @@ function TeamHero({ team, standing }: { team: TeamDetail['team']; standing: Team
 
           {/* Info */}
           <div className="flex-1 text-center sm:text-left">
-            <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">
-              {team.group_name ? `GROUP ${team.group_name}` : 'KNOCKOUT ROUND'}
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:justify-start">
+              <span className="text-[10px] font-bold tracking-[0.3em] text-amber-400">
+                {team.group_name ? `GROUP ${team.group_name}` : 'KNOCKOUT ROUND'}
+              </span>
+              {team.world_rank != null && (
+                <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold tracking-widest text-amber-400">
+                  FIFA #{team.world_rank}
+                </span>
+              )}
             </div>
             <h1 className="mt-1 font-display text-4xl leading-none tracking-wide text-cream sm:text-6xl">
               {team.name.toUpperCase()}
             </h1>
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
-              <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] font-bold tracking-widest text-cream/60">
-                {team.code}
-              </span>
-              {team.world_rank != null && (
-                <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold tracking-widest text-amber-400">
-                  FIFA #{team.world_rank}
-                </span>
-              )}
-              {team.manager && (
-                <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] font-bold tracking-widest text-cream/60">
-                  COACH · {team.manager.toUpperCase()}
-                </span>
-              )}
-            </div>
+            {team.manager && (
+              <div className="mt-2 text-sm sm:text-base text-cream/70">
+                <span className="text-[10px] font-bold tracking-[0.3em] text-cream/40 mr-2">MANAGER</span>
+                {team.manager}
+              </div>
+            )}
           </div>
         </div>
       </div>

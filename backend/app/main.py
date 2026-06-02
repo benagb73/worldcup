@@ -577,16 +577,18 @@ async def get_match(match_id: int):
 @app.get("/api/players/{player_id}", response_model=Player)
 async def get_player(player_id: int):
     async with get_db() as db:
-        # Single combined query: player + club + tournament aggregates
+        # Single combined query: player + national team + club + tournament aggregates
         row = await db.fetchone("""
             SELECT
               p.*,
+              t.name AS tname, t.code AS tcode, t.flag_url AS tflag,
               c.id AS cid, c.name AS cname, c.country AS ccountry, c.league AS cleague,
               (SELECT COUNT(*) FROM player_match_stats pms
                  WHERE pms.player_id = p.id AND pms.minutes_played > 0) AS tour_apps,
               (SELECT COALESCE(SUM(goals), 0) FROM player_match_stats pms
                  WHERE pms.player_id = p.id) AS tour_goals
             FROM players p
+            JOIN teams  t ON p.team_id = t.id
             LEFT JOIN clubs c ON p.club_id = c.id
             WHERE p.id = ?
         """, [player_id])
@@ -597,7 +599,10 @@ async def get_player(player_id: int):
     pre_caps  = row.get("intl_caps_pre")  or 0
     pre_goals = row.get("intl_goals_pre") or 0
     return Player(
-        id=row["id"], team_id=row["team_id"], name=row["name"],
+        id=row["id"], team_id=row["team_id"],
+        team_code=row.get("tcode"), team_name=row.get("tname"),
+        team_flag_url=row.get("tflag"),
+        name=row["name"],
         shirt_number=row.get("shirt_number"), position=row.get("position"),
         date_of_birth=row.get("date_of_birth"), club=club,
         club_status=row.get("club_status"),

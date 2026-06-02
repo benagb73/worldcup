@@ -83,7 +83,7 @@ export default function PlayerPage({ params }: { params: Promise<{ id: string }>
             {/* Info */}
             <div className="flex-1 text-center sm:text-left">
               <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">
-                {player.club?.country?.toUpperCase() ?? 'PLAYER'}
+                {player.team_code?.toUpperCase() ?? 'PLAYER'}
               </div>
               <h1 className="mt-1 font-display text-4xl leading-none tracking-wide text-cream sm:text-5xl">
                 {player.name.toUpperCase()}

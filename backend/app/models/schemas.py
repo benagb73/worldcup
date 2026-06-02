@@ -32,6 +32,9 @@ class Club(BaseModel):
 class Player(BaseModel):
     id: int
     team_id: int
+    team_code: Optional[str] = None     # national team 3-letter code
+    team_name: Optional[str] = None     # national team display name
+    team_flag_url: Optional[str] = None
     name: str
     shirt_number: Optional[int]
     position: Optional[str]

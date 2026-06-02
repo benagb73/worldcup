@@ -18,6 +18,9 @@ export interface Club {
 export interface Player {
   id: number
   team_id: number
+  team_code?: string | null      // national team 3-letter code
+  team_name?: string | null
+  team_flag_url?: string | null
   name: string
   shirt_number: number | null
   position: 'GK' | 'DEF' | 'MID' | 'FWD' | null
