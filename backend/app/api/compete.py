@@ -149,14 +149,22 @@ def _result(h: int, a: int) -> str:
     return "tie"
 
 
-async def _first_scorer_player_id(db, match_id: int) -> Optional[int]:
-    """Player who scored the first true goal of the match, or None if 0-0.
+async def _first_goal_event(db, match_id: int) -> Optional[dict]:
+    """Chronologically-first goal event in the match (regular OR own goal),
+    or None if the match was truly goalless.
 
-    Own goals and missed penalties are excluded.
+    Returns a dict { player_id, is_own_goal } so the predictor can tell apart:
+      * no goals at all                  → return None       (no_goal picks win)
+      * first goal was a regular goal    → real scorer       (that player's pick wins)
+      * first goal was an own goal       → is_own_goal=True  (nobody wins the
+                                                              first-scorer point,
+                                                              including the player
+                                                              who later scored a
+                                                              regular goal)
     """
     row = await db.fetchone("""
-        SELECT player_id FROM match_events
-        WHERE match_id = ? AND event_type = 'goal' AND is_own_goal = 0
+        SELECT player_id, event_type, is_own_goal FROM match_events
+        WHERE match_id = ? AND event_type IN ('goal', 'own_goal')
         ORDER BY
           CASE period
             WHEN 'normal'        THEN 0
@@ -168,13 +176,20 @@ async def _first_scorer_player_id(db, match_id: int) -> Optional[int]:
           minute, added_time, id
         LIMIT 1
     """, [match_id])
-    return row["player_id"] if row else None
+    if not row:
+        return None
+    is_own = row["event_type"] == "own_goal" or bool(row["is_own_goal"])
+    return {"player_id": row["player_id"], "is_own_goal": is_own}
 
 
 def _score_pick(pick: dict, eff_h: int, eff_a: int,
-                actual_first_scorer: Optional[int],
+                first_goal: Optional[dict],
                 config: dict) -> int:
-    """Compute points for one pick row against a finalised match."""
+    """Compute points for one pick row against a finalised match.
+
+    first_goal is the result of _first_goal_event(): either None (truly
+    goalless match) or a dict { player_id, is_own_goal }.
+    """
     points = 0
 
     # Result
@@ -190,16 +205,19 @@ def _score_pick(pick: dict, eff_h: int, eff_a: int,
         points += config["one_score_points"]
 
     # First scorer
-    # - "no goal" pick only wins when the effective score is genuinely 0-0
-    #   (a match where the only goals were own goals leaves
-    #   actual_first_scorer = None but is NOT goalless, so the no_goal pick
-    #   must lose)
-    # - Otherwise we need a matching player id
+    # - "no goal" pick only wins when the match was truly goalless
+    # - If the FIRST goal of the match was an own goal, NOBODY wins the
+    #   first-scorer point — not the OG scorer, and not the player who
+    #   went on to score the first regular goal afterwards
+    # - Otherwise the pick must match the first-goal scorer's player id
     pick_pid = pick["first_scorer_player_id"]
     if pick.get("no_goal"):
-        if eff_h == 0 and eff_a == 0:
+        if first_goal is None:
             points += config["first_scorer_points"]
-    elif pick_pid is not None and pick_pid == actual_first_scorer:
+    elif (first_goal is not None
+          and not first_goal["is_own_goal"]
+          and pick_pid is not None
+          and pick_pid == first_goal["player_id"]):
         points += config["first_scorer_points"]
 
     # Joker doubles the total
@@ -230,11 +248,11 @@ async def recompute_match_points(db, match_id: int) -> None:
 
     config = await _scoring_config(db)
     eff_h, eff_a = _effective_score(match, config["pen_winner_bonus_goal"])
-    first_scorer = await _first_scorer_player_id(db, match_id)
+    first_goal = await _first_goal_event(db, match_id)
 
     picks = await db.fetchall("SELECT * FROM picks WHERE match_id = ?", [match_id])
     for p in picks:
-        pts = _score_pick(p, eff_h, eff_a, first_scorer, config)
+        pts = _score_pick(p, eff_h, eff_a, first_goal, config)
         await db.execute(
             "UPDATE picks SET points_awarded = ?, updated_at = datetime('now') "
             "WHERE id = ?",
