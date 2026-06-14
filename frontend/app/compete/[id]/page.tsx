@@ -30,6 +30,10 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
   const detail: CompetitorDetail = comp
   const rows:   PickRow[]        = picks ?? []
 
+  // Tab state for Open vs Locked picks. Default to Open if there are any,
+  // otherwise Locked.
+  const [tab, setTab] = useState<'open' | 'locked'>('open')
+
   function claim() {
     markAsOwner(numericId)
     setOwner(true)
@@ -79,8 +83,18 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
+      {/* Tabs */}
+      <div className="sticky top-0 z-30 -mx-4 sm:mx-0 bg-ink/80 backdrop-blur-md border-y border-white/5 px-4 py-2 sm:rounded-full sm:border sm:px-1 sm:py-1 sm:flex sm:items-center sm:gap-1">
+        <TabButton active={tab === 'open'}   onClick={() => setTab('open')}>
+          OPEN <span className="opacity-60">· {active.length}</span>
+        </TabButton>
+        <TabButton active={tab === 'locked'} onClick={() => setTab('locked')}>
+          LOCKED <span className="opacity-60">· {closed.length}</span>
+        </TabButton>
+      </div>
+
       {/* Open picks — only visible to the owner */}
-      {owner ? (
+      {tab === 'open' && (owner ? (
         <section>
           <SectionHeading
             eyebrow="OPEN"
@@ -88,7 +102,7 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
             subtitle={`${active.length} match${active.length === 1 ? '' : 'es'} still open · picks lock at kickoff`}
           />
           {active.length === 0 ? (
-            <EmptyBlock>All matches are locked or finished. Wait for the next round!</EmptyBlock>
+            <EmptyBlock>All matches are locked or finished. Switch to LOCKED to review past picks.</EmptyBlock>
           ) : (
             <div className="space-y-4">
               {active.map(p => (
@@ -116,18 +130,22 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
             {detail.team_name}&rsquo;s picks for upcoming matches will appear publicly once each match kicks off.
           </EmptyBlock>
         </section>
-      )}
+      ))}
 
       {/* Locked picks */}
-      {closed.length > 0 && (
+      {tab === 'locked' && (
         <section>
           <SectionHeading
             eyebrow="LOCKED"
             title="Past Picks & Results"
           />
-          <div className="space-y-3">
-            {closed.map(p => <LockedPickCard key={p.match_id} pick={p} />)}
-          </div>
+          {closed.length === 0 ? (
+            <EmptyBlock>No matches locked yet. Once a match kicks off it'll show up here with the result and points earned.</EmptyBlock>
+          ) : (
+            <div className="space-y-3">
+              {closed.map(p => <LockedPickCard key={p.match_id} pick={p} />)}
+            </div>
+          )}
         </section>
       )}
     </div>
@@ -386,6 +404,24 @@ function PickCard({ pick, competitorId, detail, scoring, rosters, onSaved }: {
   )
 }
 
+function TabButton({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'inline-flex flex-1 items-center justify-center rounded-full px-4 py-2 text-xs font-bold tracking-widest transition-colors',
+        active
+          ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-400/30'
+          : 'text-cream/50 hover:text-cream hover:bg-white/5'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 function SaveStatus({ state, dirty, hasPick }: {
   state: 'idle' | 'saving' | 'saved' | 'error'
   dirty: boolean
@@ -436,6 +472,7 @@ function NumStepper({ value, onChange }: { value: number; onChange: (v: number) 
         type="number" min={0} max={20}
         value={value}
         onChange={e => onChange(Math.max(0, Math.min(20, Number(e.target.value || 0))))}
+        onFocus={e => e.target.select()}
         className="w-14 rounded-lg border border-white/10 bg-black/30 px-1 py-1.5 text-center font-display text-2xl tabular-nums text-cream focus:border-amber-400/50 focus:outline-none"
       />
       <button

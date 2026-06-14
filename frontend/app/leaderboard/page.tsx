@@ -145,7 +145,7 @@ export default function LeaderboardPage() {
         <div className="overflow-hidden rounded-2xl border border-white/10 panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm landscape:min-w-[1100px] sm:min-w-[1100px]">
-              <thead className="bg-black/30">
+              <thead className="bg-black/80 backdrop-blur sticky top-0 z-20">
                 <tr className="text-[10px] font-bold tracking-widest text-cream/40">
                   <th className="px-3 py-2 text-left sticky left-0 z-10 bg-black/40">RANK</th>
                   <th className="px-3 py-2 text-left sticky left-12 z-10 bg-black/40 min-w-[200px]">PLAYER</th>

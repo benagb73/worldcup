@@ -127,10 +127,10 @@ function CinematicScoreHeader({ match }: { match: MatchDetail['match'] }) {
             : <TbdHero align="right" />}
 
           {/* Score block */}
-          <div className="text-center min-w-[180px] sm:min-w-[260px]">
+          <div className="text-center min-w-[120px] sm:min-w-[180px] lg:min-w-[260px]">
             {isScheduled ? (
               <div>
-                <div className="font-display text-6xl tracking-wider text-cream/30 sm:text-7xl">VS</div>
+                <div className="font-display text-4xl tracking-wider text-cream/30 sm:text-6xl lg:text-7xl">VS</div>
                 <div className="mt-3 text-xs font-semibold tracking-widest text-amber-400">
                   {formatKickoff(match.scheduled_at).toUpperCase()}
                 </div>
@@ -138,21 +138,21 @@ function CinematicScoreHeader({ match }: { match: MatchDetail['match'] }) {
             ) : (
               <div>
                 <div className={clsx(
-                  'flex items-center justify-center gap-3 font-display leading-none tracking-tight tabular-nums sm:gap-6',
+                  'flex items-center justify-center gap-1.5 font-display leading-none tracking-tight tabular-nums sm:gap-3 lg:gap-6',
                   isLive ? 'drop-shadow-[0_0_20px_rgba(251,191,36,0.4)]' : ''
                 )}>
                   <span className={clsx(
-                    'text-7xl sm:text-9xl',
+                    'text-5xl sm:text-7xl lg:text-9xl',
                     isLive ? 'text-amber-400 animate-score-in' : 'text-cream'
                   )}>
                     {home}
                   </span>
                   <span className={clsx(
-                    'text-5xl sm:text-7xl',
+                    'text-3xl sm:text-5xl lg:text-7xl',
                     isLive ? 'text-live/70' : 'text-cream/20'
                   )}>:</span>
                   <span className={clsx(
-                    'text-7xl sm:text-9xl',
+                    'text-5xl sm:text-7xl lg:text-9xl',
                     isLive ? 'text-amber-400 animate-score-in' : 'text-cream'
                   )}>
                     {away}

@@ -135,6 +135,7 @@ export default function AdminScoringPage() {
                     type="number" min={0} max={99}
                     value={current}
                     onChange={e => setField(f.key, Math.max(0, Number(e.target.value || 0)))}
+                    onFocus={e => e.target.select()}
                     className="w-14 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-center font-display text-2xl tabular-nums text-cream focus:border-amber-400/50 focus:outline-none"
                   />
                   <button

@@ -18,16 +18,17 @@ const STATUS_OPTIONS = [
   { value: 'postponed',        label: 'Postponed' },
 ]
 
+// NOTE: own goals are entered as event_type='goal' + "Own goal" checkbox.
+// There is intentionally NO separate 'own_goal' option here so the admin
+// can't double-enter the same goal via two paths.
 const EVENT_TYPES = [
   { value: 'goal',              label: '⚽ Goal' },
-  { value: 'own_goal',          label: '⚽ Own goal' },
   { value: 'goal_penalty_miss', label: '✕ Penalty miss' },
   { value: 'assist',            label: '🎯 Assist' },
   { value: 'yellow_card',       label: '🟨 Yellow card' },
   { value: 'yellow_red_card',   label: '🟨🟥 2nd yellow' },
   { value: 'red_card',          label: '🟥 Red card' },
-  { value: 'substitution_off',  label: '↓ Sub off' },
-  { value: 'substitution_on',   label: '↑ Sub on' },
+  { value: 'substitution_off',  label: '⇆ Substitution' },
 ]
 
 const PERIOD_OPTIONS = [
@@ -331,6 +332,7 @@ function ScoreCell({ value, onChange, onBump }: {
           const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value))
           onChange(v)
         }}
+        onFocus={e => e.target.select()}
         placeholder="–"
         className="w-14 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-center font-display text-2xl tabular-nums text-cream placeholder:text-cream/20 focus:border-amber-400/50 focus:outline-none"
       />
@@ -397,7 +399,7 @@ function EventsPanel({ match, events, homeRoster, awayRoster, onChange }: {
       ) : (
         <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
           <table className="w-full text-sm">
-            <thead className="bg-black/30">
+            <thead className="bg-black/80 backdrop-blur sticky top-0 z-20">
               <tr className="text-[10px] font-bold tracking-widest text-cream/40">
                 <th className="px-3 py-2 text-left">MIN</th>
                 <th className="px-3 py-2 text-left">TEAM</th>
@@ -450,6 +452,7 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
   const [teamId, setTeamId]       = useState<number>(initialTeam)
   const [playerId, setPlayerId]   = useState<number | ''>('')
   const [assistId, setAssistId]   = useState<number | ''>('')
+  const [subOnId, setSubOnId]     = useState<number | ''>('')
   const [type, setType]           = useState('goal')
   const [minute, setMinute]       = useState(1)
   const [added, setAdded]         = useState(0)
@@ -459,18 +462,36 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
   const [busy, setBusy]           = useState(false)
   const [err, setErr]             = useState<string | null>(null)
 
-  const roster = teamId === match.home_id ? homeRoster : awayRoster
+  // For an own goal, the unfortunate scorer is on the OPPOSING team, so the
+  // player picker has to show that team's roster. Everywhere else, the player
+  // belongs to the team selected above.
+  const opposingTeamId = teamId === match.home_id ? match.away_id : match.home_id
+  const playerTeamId   = (type === 'goal' && own) ? opposingTeamId : teamId
+  const roster         = playerTeamId === match.home_id ? homeRoster : awayRoster
+
+  // Clear the selected player whenever the relevant roster swaps (toggling
+  // own-goal, changing team, etc.) — the old id won't exist in the new list.
+  useEffect(() => {
+    setPlayerId('')
+    setAssistId('')
+  }, [playerTeamId])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!playerId) { setErr('Pick a player'); return }
+    if (type === 'substitution_off' && !subOnId) {
+      setErr('Pick the player coming on'); return
+    }
     setBusy(true)
     setErr(null)
     try {
       await adminFetch(`/matches/${match.id}/events`, {
         method: 'POST',
         body: JSON.stringify({
-          team_id: teamId,
+          // team_id always tracks the PLAYER'S team. For an own goal that's
+          // the defending team; _recompute_score_from_events credits the
+          // opposing (attacking) team automatically.
+          team_id: playerTeamId,
           player_id: Number(playerId),
           event_type: type,
           minute,
@@ -481,10 +502,13 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
           // Only send assist_player_id for real goals (not own goals / pens-missed)
           assist_player_id:
             (type === 'goal' && !own && assistId !== '') ? Number(assistId) : null,
+          sub_on_player_id:
+            (type === 'substitution_off' && subOnId !== '') ? Number(subOnId) : null,
         }),
       })
-      // Reset assist for the next event entry
+      // Reset auxiliary fields for the next event entry
       setAssistId('')
+      setSubOnId('')
       await onSaved()
     } catch (e) {
       setErr(String(e))
@@ -502,10 +526,10 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
   return (
     <form onSubmit={submit} className="mb-4 rounded-xl border border-amber-400/20 bg-amber-500/[0.04] p-4">
       <div className="grid gap-3 sm:grid-cols-[140px_140px_1fr_140px]">
-        <Field label="Team">
+        <Field label={type === 'goal' && own ? 'Goal credited to' : 'Team'}>
           <select
             value={teamId}
-            onChange={e => { setTeamId(Number(e.target.value)); setPlayerId('') }}
+            onChange={e => { setTeamId(Number(e.target.value)) }}
             className="adm-input"
           >
             <option value={match.home_id}>{match.home_code} {match.home_name}</option>
@@ -517,7 +541,7 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
             {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </Field>
-        <Field label="Player">
+        <Field label={type === 'goal' && own ? 'Scored by (own goal — defending player)' : 'Player'}>
           <select value={playerId} onChange={e => setPlayerId(e.target.value ? Number(e.target.value) : '')} className="adm-input">
             <option value="">— select —</option>
             {roster.map(p => (
@@ -535,11 +559,15 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
 
         <Field label="Minute">
           <input type="number" min={0} max={130} value={minute}
-                 onChange={e => setMinute(Number(e.target.value))} className="adm-input" />
+                 onChange={e => setMinute(Number(e.target.value))}
+                 onFocus={e => e.target.select()}
+                 className="adm-input" />
         </Field>
         <Field label="+ Added">
           <input type="number" min={0} max={20} value={added}
-                 onChange={e => setAdded(Number(e.target.value))} className="adm-input" />
+                 onChange={e => setAdded(Number(e.target.value))}
+                 onFocus={e => e.target.select()}
+                 className="adm-input" />
         </Field>
         {isGoalish && (
           <div className="flex items-center gap-4 self-end">
@@ -566,6 +594,26 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
             >
               <option value="">— no assist —</option>
               {assistOptions.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.shirt_number ? `#${p.shirt_number} ` : ''}{p.name}{p.position ? ` (${p.position})` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+
+      {/* Sub-on row — when recording a substitution, pair player off with player on */}
+      {type === 'substitution_off' && (
+        <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/[0.04] p-3">
+          <Field label="Coming on (required)">
+            <select
+              value={subOnId}
+              onChange={e => setSubOnId(e.target.value ? Number(e.target.value) : '')}
+              className="adm-input"
+            >
+              <option value="">— select —</option>
+              {roster.filter(p => p.id !== playerId).map(p => (
                 <option key={p.id} value={p.id}>
                   {p.shirt_number ? `#${p.shirt_number} ` : ''}{p.name}{p.position ? ` (${p.position})` : ''}
                 </option>
@@ -659,6 +707,25 @@ function TeamLineupEditor({ matchId, teamId, teamLabel, roster }: {
   const [draft, setDraft] = useState<Record<number, LineupDraft>>({})
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
+
+  // Pre-check every roster player as PRESENT (not starter) on first load so
+  // admin only has to UNCHECK the ones not in the matchday squad, then click
+  // ★ on the 11 starters. Massively fewer clicks than picking from scratch.
+  useEffect(() => {
+    if (roster.length > 0 && Object.keys(draft).length === 0) {
+      const initial: Record<number, LineupDraft> = {}
+      for (const p of roster) {
+        initial[p.id] = {
+          player_id: p.id,
+          is_starter: false,
+          position_played: p.position ?? '',
+          shirt_number: p.shirt_number ?? null,
+        }
+      }
+      setDraft(initial)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roster])
 
   function togglePresent(p: RosterPlayer) {
     setDraft(prev => {
@@ -1009,7 +1076,7 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
 
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
-          <thead className="bg-black/20 text-[10px] font-bold tracking-widest text-cream/40">
+          <thead className="bg-black/80 backdrop-blur sticky top-0 z-20 text-[10px] font-bold tracking-widest text-cream/40">
             <tr>
               {/* Portrait phone shows the at-a-glance derived snapshot only
                   (MIN/G/A/Y/R). Landscape phone + tablets+ show the full
@@ -1114,6 +1181,7 @@ function StatCell({ value, onChange, dim, hideOnPortrait }: {
         min={0}
         value={value}
         onChange={e => onChange(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+        onFocus={e => e.target.select()}
         className={clsx(
           'w-12 rounded border border-white/10 bg-black/30 px-1 py-0.5 text-center font-mono text-xs tabular-nums focus:border-amber-400/50 focus:outline-none',
           dim ? 'text-cream/30' : 'text-cream'

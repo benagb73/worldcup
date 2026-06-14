@@ -70,6 +70,10 @@ class EventCreate(BaseModel):
     # Convenience: if event_type == 'goal' and this is provided, the server
     # auto-creates a linked 'assist' event with related_event_id = goal's id.
     assist_player_id: Optional[int] = None
+    # Convenience: if event_type == 'substitution_off' and this is provided,
+    # the server auto-creates a linked 'substitution_on' event for the
+    # incoming player (related_event_id = sub-off event's id).
+    sub_on_player_id: Optional[int] = None
 
 
 class MatchTeams(BaseModel):
@@ -348,14 +352,34 @@ async def add_match_event(match_id: int, body: EventCreate):
                   body.minute, body.added_time, body.period, new_id])
             assist_id = arows[0]["id"] if arows else None
 
+        # Auto-create the partner 'substitution_on' event when one is provided
+        sub_on_id = None
+        if (body.event_type == "substitution_off"
+                and body.sub_on_player_id
+                and body.sub_on_player_id != body.player_id
+                and new_id is not None):
+            srows = await db.execute("""
+                INSERT INTO match_events
+                  (match_id, team_id, player_id, event_type, minute, added_time, period,
+                   is_penalty, is_own_goal, related_event_id)
+                VALUES (?,?,?,'substitution_on',?,?,?,0,0,?)
+                RETURNING id
+            """, [match_id, body.team_id, body.sub_on_player_id,
+                  body.minute, body.added_time, body.period, new_id])
+            sub_on_id = srows[0]["id"] if srows else None
+
         # Refresh derived stats — events changed
         await _recompute_derived_stats(db, match_id)
+
+        # Auto-sync live score from goal events (skips other event types)
+        if body.event_type in ("goal", "own_goal"):
+            await _recompute_score_from_events(db, match_id)
 
         # First-scorer may have changed → re-score family picks
         from app.api.compete import recompute_match_points
         await recompute_match_points(db, match_id)
 
-    return {"ok": True, "id": new_id, "assist_id": assist_id}
+    return {"ok": True, "id": new_id, "assist_id": assist_id, "sub_on_id": sub_on_id}
 
 
 @router.delete("/events/{event_id}")
@@ -372,6 +396,7 @@ async def delete_event(event_id: int):
 
         if ev and ev.get("match_id") is not None:
             await _recompute_derived_stats(db, ev["match_id"])
+            await _recompute_score_from_events(db, ev["match_id"])
             from app.api.compete import recompute_match_points
             await recompute_match_points(db, ev["match_id"])
     return {"ok": True}
@@ -386,6 +411,47 @@ async def delete_event(event_id: int):
 # saves, conceded). Whenever a lineup or event changes we rebuild the derived
 # columns in player_match_stats, leaving the manual columns untouched.
 # ---------------------------------------------------------------------------
+
+async def _recompute_score_from_events(db, match_id: int) -> None:
+    """Sync match.ft_home / match.ft_away with the goal events on this match.
+
+    Counts:
+      home_goals = (regular goals by home team) + (own goals by away team)
+      away_goals = (regular goals by away team) + (own goals by home team)
+
+    Called whenever a goal event is added or deleted so the public live score
+    updates automatically. Admin can still manually override via the score
+    panel, but the next goal event will re-sync.
+    """
+    m = await db.fetchone(
+        "SELECT home_team_id, away_team_id FROM matches WHERE id = ?", [match_id]
+    )
+    if not m or m["home_team_id"] is None or m["away_team_id"] is None:
+        return
+
+    events = await db.fetchall(
+        "SELECT team_id, event_type, is_own_goal FROM match_events "
+        "WHERE match_id = ? AND event_type IN ('goal', 'own_goal')",
+        [match_id]
+    )
+    home, away = 0, 0
+    for e in events:
+        # own_goal flag (or 'own_goal' type) credits the OPPOSING team
+        is_own = e["event_type"] == "own_goal" or bool(e["is_own_goal"])
+        scoring_team = m["away_team_id"] if (is_own and e["team_id"] == m["home_team_id"]) \
+                        else m["home_team_id"] if (is_own and e["team_id"] == m["away_team_id"]) \
+                        else e["team_id"]
+        if scoring_team == m["home_team_id"]:
+            home += 1
+        elif scoring_team == m["away_team_id"]:
+            away += 1
+
+    await db.execute(
+        "UPDATE matches SET ft_home = ?, ft_away = ?, updated_at = datetime('now') "
+        "WHERE id = ?",
+        [home, away, match_id]
+    )
+
 
 async def _recompute_derived_stats(db, match_id: int) -> None:
     """Sync player_match_stats with the current lineup + events for one match.
@@ -442,8 +508,10 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
         yellow   = evcount(pid, {"yellow_card", "yellow_red_card"})
         red      = evcount(pid, {"red_card", "yellow_red_card"})
 
-        # Upsert. Manual columns default to 0 on first insert (via schema) and
-        # are NOT overwritten on subsequent updates.
+        # Upsert. Manual columns (passes, tackles, etc.) default to 0 on first
+        # insert and are NOT overwritten on subsequent updates.
+        # Derived columns (minutes, goals, assists, cards) ARE overwritten so
+        # they always reflect current lineup + events.
         await db.execute("""
             INSERT INTO player_match_stats
               (match_id, team_id, player_id, is_starter, minutes_played,
@@ -451,13 +519,7 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
             VALUES (?,?,?,?,?,?,?,?,?)
             ON CONFLICT(match_id, player_id) DO UPDATE SET
               is_starter      = excluded.is_starter,
-              minutes_played  = CASE
-                                  WHEN player_match_stats.minutes_played IS NULL
-                                       OR player_match_stats.minutes_played = 0
-                                       OR player_match_stats.is_starter   != excluded.is_starter
-                                  THEN excluded.minutes_played
-                                  ELSE player_match_stats.minutes_played
-                                END,
+              minutes_played  = excluded.minutes_played,
               goals           = excluded.goals,
               assists         = excluded.assists,
               yellow_cards    = excluded.yellow_cards,

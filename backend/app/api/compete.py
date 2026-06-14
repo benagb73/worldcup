@@ -189,11 +189,17 @@ def _score_pick(pick: dict, eff_h: int, eff_a: int,
     elif home_match or away_match:
         points += config["one_score_points"]
 
-    # First scorer — None ↔ None means "no goal" pick matched a 0-0
+    # First scorer
+    # - "no goal" pick only wins when the effective score is genuinely 0-0
+    #   (a match where the only goals were own goals leaves
+    #   actual_first_scorer = None but is NOT goalless, so the no_goal pick
+    #   must lose)
+    # - Otherwise we need a matching player id
     pick_pid = pick["first_scorer_player_id"]
     if pick.get("no_goal"):
-        pick_pid = None
-    if pick_pid == actual_first_scorer:
+        if eff_h == 0 and eff_a == 0:
+            points += config["first_scorer_points"]
+    elif pick_pid is not None and pick_pid == actual_first_scorer:
         points += config["first_scorer_points"]
 
     # Joker doubles the total
