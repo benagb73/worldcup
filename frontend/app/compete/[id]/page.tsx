@@ -24,15 +24,16 @@ export default function CompetitorPage({ params }: { params: Promise<{ id: strin
   // Which pools this competitor is in
   const { data: pools } = useCompetitorPools(id)
 
+  // Tab state for Open vs Locked picks. MUST be declared before any early
+  // returns so the hook count is stable across renders (otherwise React
+  // throws "rendered more hooks than during the previous render").
+  const [tab, setTab] = useState<'open' | 'locked'>('open')
+
   if (lc || lp) return <Skeleton />
   if (!comp)    return <div className="py-20 text-center text-cream/40">Competitor not found</div>
 
   const detail: CompetitorDetail = comp
   const rows:   PickRow[]        = picks ?? []
-
-  // Tab state for Open vs Locked picks. Default to Open if there are any,
-  // otherwise Locked.
-  const [tab, setTab] = useState<'open' | 'locked'>('open')
 
   function claim() {
     markAsOwner(numericId)
