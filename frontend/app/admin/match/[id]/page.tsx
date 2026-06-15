@@ -397,7 +397,7 @@ function EventsPanel({ match, events, homeRoster, awayRoster, onChange }: {
           No events yet. {adding ? '' : 'Click + ADD EVENT to record the first goal/card/sub.'}
         </div>
       ) : (
-        <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+        <div className="mt-4 overflow-clip rounded-xl border border-white/10">
           <table className="w-full text-sm">
             <thead className="bg-black/80 backdrop-blur sticky top-0 z-20">
               <tr className="text-[10px] font-bold tracking-widest text-cream/40">
@@ -1023,13 +1023,49 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
   const [draft, setDraft] = useState<AdminStatRow[]>(rows)
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
+  // Per-player pass-accuracy %. We don't store this in the DB — only
+  // passes_attempted (total) and passes_completed are persisted — but the
+  // admin enters it directly, so we keep it as parallel UI state derived from
+  // the saved totals. Reseeds whenever rows refresh.
+  const [accDraft, setAccDraft] = useState<Record<number, number>>({})
 
   // Re-seed draft whenever upstream rows change (refresh or first load)
-  useEffect(() => { setDraft(rows) }, [rows])
+  useEffect(() => {
+    setDraft(rows)
+    const next: Record<number, number> = {}
+    for (const r of rows) {
+      next[r.player_id] = (r.passes_attempted ?? 0) > 0
+        ? Math.round((r.passes_completed / r.passes_attempted) * 100)
+        : 0
+    }
+    setAccDraft(next)
+  }, [rows])
 
   function setField(pid: number, field: EditableField, value: number) {
     setDraft(prev => prev.map(r =>
       r.player_id === pid ? { ...r, [field]: value } : r
+    ))
+  }
+
+  // Pass-total edit: re-derive completed from current accuracy %.
+  function setPassTotal(pid: number, total: number) {
+    const acc  = accDraft[pid] ?? 0
+    const comp = Math.max(0, Math.min(total, Math.round(total * acc / 100)))
+    setDraft(prev => prev.map(r =>
+      r.player_id === pid
+        ? { ...r, passes_attempted: total, passes_completed: comp }
+        : r
+    ))
+  }
+
+  // Pass-accuracy edit: clamp to 0..100, re-derive completed from current total.
+  function setPassAcc(pid: number, acc: number) {
+    const clamped = Math.max(0, Math.min(100, acc))
+    const total   = draft.find(r => r.player_id === pid)?.passes_attempted ?? 0
+    const comp    = Math.max(0, Math.min(total, Math.round(total * clamped / 100)))
+    setAccDraft(prev => ({ ...prev, [pid]: clamped }))
+    setDraft(prev => prev.map(r =>
+      r.player_id === pid ? { ...r, passes_completed: comp } : r
     ))
   }
 
@@ -1066,7 +1102,7 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">
+    <div className="overflow-clip rounded-xl border border-white/10 bg-white/[0.02]">
       <div className="flex items-center justify-between gap-2 border-b border-white/5 bg-black/30 px-4 py-2.5">
         <span className="font-display text-sm tracking-wider text-cream">{label}</span>
         <span className="text-[10px] font-bold tracking-widest text-cream/40">
@@ -1087,9 +1123,8 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
               <th className="px-1.5 py-2 text-center text-emerald-400">A</th>
               <th className="px-1.5 py-2 text-center">Y</th>
               <th className="px-1.5 py-2 text-center">R</th>
-              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">PC</th>
-              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">PA</th>
-              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">TKL</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">TOT</th>
+              <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">ACC%</th>
               <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">F+</th>
               <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">F-</th>
               <th className="hidden landscape:table-cell sm:table-cell px-1.5 py-2 text-center">SH</th>
@@ -1133,9 +1168,10 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
 
                   {/* Editable manual columns — hidden in portrait so the
                       mobile snapshot stays at-a-glance. Rotate to edit. */}
-                  <StatCell value={r.passes_completed} onChange={v => setField(r.player_id, 'passes_completed', v)} hideOnPortrait />
-                  <StatCell value={r.passes_attempted} onChange={v => setField(r.player_id, 'passes_attempted', v)} hideOnPortrait />
-                  <StatCell value={r.tackles_made}     onChange={v => setField(r.player_id, 'tackles_made',     v)} hideOnPortrait />
+                  {/* Total passes attempted (the admin enters this) */}
+                  <StatCell value={r.passes_attempted} onChange={v => setPassTotal(r.player_id, v)} hideOnPortrait />
+                  {/* Pass accuracy %, clamped 0..100. passes_completed = round(total * acc/100) */}
+                  <StatCell value={accDraft[r.player_id] ?? 0} onChange={v => setPassAcc(r.player_id, v)} hideOnPortrait max={100} />
                   <StatCell value={r.fouls_won}        onChange={v => setField(r.player_id, 'fouls_won',        v)} hideOnPortrait />
                   <StatCell value={r.fouls_committed}  onChange={v => setField(r.player_id, 'fouls_committed',  v)} hideOnPortrait />
                   <StatCell value={r.shots_total}      onChange={v => setField(r.player_id, 'shots_total',      v)} hideOnPortrait />
@@ -1151,7 +1187,7 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
 
       <div className="flex items-center justify-between gap-2 border-t border-white/5 bg-black/20 px-4 py-2.5">
         <span className="text-[10px] text-cream/40">
-          {flash ?? 'PC/PA passes · TKL tackles · F+/F- fouls won/committed · SH shots · SOT on target · SV saves · GA conceded'}
+          {flash ?? 'TOT total passes · ACC pass accuracy % · F+/F- fouls won/committed · SH shots · SOT on target · SV saves · GA conceded'}
         </span>
         <button
           onClick={save}
@@ -1165,11 +1201,12 @@ function TeamStatsTable({ label, matchId, teamId, rows, onRefresh }: {
   )
 }
 
-function StatCell({ value, onChange, dim, hideOnPortrait }: {
+function StatCell({ value, onChange, dim, hideOnPortrait, max }: {
   value: number
   onChange: (v: number) => void
   dim?: boolean
   hideOnPortrait?: boolean
+  max?: number
 }) {
   return (
     <td className={clsx(
@@ -1179,8 +1216,14 @@ function StatCell({ value, onChange, dim, hideOnPortrait }: {
       <input
         type="number"
         min={0}
+        max={max}
         value={value}
-        onChange={e => onChange(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+        onChange={e => {
+          if (e.target.value === '') { onChange(0); return }
+          let n = Math.max(0, Number(e.target.value))
+          if (max != null) n = Math.min(max, n)
+          onChange(n)
+        }}
         onFocus={e => e.target.select()}
         className={clsx(
           'w-12 rounded border border-white/10 bg-black/30 px-1 py-0.5 text-center font-mono text-xs tabular-nums focus:border-amber-400/50 focus:outline-none',

@@ -24,7 +24,9 @@ export default function PlayerPage({ params }: { params: Promise<{ id: string }>
 
   const totals = (stats ?? []).reduce(
     (acc: any, s: PlayerMatchStats) => ({
-      apps:       acc.apps       + 1,
+      // Only matches where the player actually got on the pitch count as
+      // appearances. Benchwarmer rows have minutes_played === 0.
+      apps:       acc.apps       + (s.minutes_played > 0 ? 1 : 0),
       mins:       acc.mins       + s.minutes_played,
       goals:      acc.goals      + s.goals,
       assists:    acc.assists    + s.assists,
@@ -163,7 +165,6 @@ export default function PlayerPage({ params }: { params: Promise<{ id: string }>
               <StatBox label="Minutes"     value={totals.mins} />
               <StatBox label="Goals"       value={totals.goals}    highlight={totals.goals > 0} />
               <StatBox label="Assists"     value={totals.assists}  highlight={totals.assists > 0} />
-              <StatBox label="Tackles"     value={totals.tackles} />
               <StatBox label="Fouls Won"   value={totals.foulsW} />
               <StatBox label="Fouls Cmt"   value={totals.foulsC} />
               <StatBox label="Yellow Cards" value={totals.yellows}  warn={totals.yellows > 0} />
@@ -200,7 +201,10 @@ export default function PlayerPage({ params }: { params: Promise<{ id: string }>
             <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">PER MATCH</div>
             <h2 className="font-display text-3xl tracking-wide text-cream">Match Log</h2>
           </div>
-          <div className="overflow-hidden rounded-2xl border border-white/10 panel">
+          {/* overflow-clip keeps the rounded corners crisp without establishing a
+              scroll containing block, so the sticky header inside actually sticks
+              to the viewport when you scroll. */}
+          <div className="overflow-clip rounded-2xl border border-white/10 panel">
             <div className="hidden sm:grid grid-cols-[40px_1fr_repeat(6,minmax(0,52px))] items-center gap-2 border-b border-white/5 bg-black/80 backdrop-blur sticky top-0 z-20 px-4 py-2.5 text-[10px] font-bold tracking-widest text-cream/40">
               <span className="text-center">#</span>
               <span>ROLE</span>

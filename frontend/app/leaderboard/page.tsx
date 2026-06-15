@@ -49,7 +49,6 @@ const COLUMNS: ColumnDef[] = [
   { key: 'pass_acc',      label: 'Pass %',   short: 'PS%',  numeric: true, defaultDir: 'desc',
     value: passAcc,
     render: r => (r.passes_attempted > 0 ? `${Math.round(passAcc(r))}%` : '–') },
-  { key: 'tackles_made',  label: 'Tackles',  short: 'TKL',  numeric: true, defaultDir: 'desc', value: r => r.tackles_made },
   { key: 'fouls_won',     label: 'Fouls Won', short: 'F+',  numeric: true, defaultDir: 'desc', value: r => r.fouls_won },
   { key: 'fouls_committed', label: 'Fouls Cmt', short: 'F-', numeric: true, defaultDir: 'desc', value: r => r.fouls_committed },
   { key: 'yellow_cards',  label: 'Yellows',  short: 'Y',    numeric: true, defaultDir: 'desc', value: r => r.yellow_cards },
@@ -142,7 +141,7 @@ export default function LeaderboardPage() {
           No player has logged any minutes yet. Stats appear here as soon as a lineup with minutes is recorded.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-white/10 panel">
+        <div className="overflow-clip rounded-2xl border border-white/10 panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm landscape:min-w-[1100px] sm:min-w-[1100px]">
               <thead className="bg-black/80 backdrop-blur sticky top-0 z-20">

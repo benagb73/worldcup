@@ -202,7 +202,7 @@ function StatTile({ label, value, accent, danger }: {
 
 function PositionGroup({ pos, players }: { pos: string; players: PlayerTournamentTotals[] }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/10 panel">
+    <div className="overflow-clip rounded-2xl border border-white/10 panel">
       <div className={clsx(
         'flex items-center justify-between border-b border-white/5 bg-black/30 px-4 py-2.5',
       )}>

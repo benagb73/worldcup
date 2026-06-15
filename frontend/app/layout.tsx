@@ -23,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 function SiteHeader() {
   return (
-    <header className="sticky top-0 z-50 border-b border-white/5 bg-ink/75 backdrop-blur-xl">
+    <header className="border-b border-white/5 bg-ink/75 backdrop-blur-xl">
       {/* Host nation flag strip */}
       <div className="h-[3px] w-full bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600" />
 
