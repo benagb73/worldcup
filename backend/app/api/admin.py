@@ -466,7 +466,8 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
         [match_id]
     )
     events = await db.fetchall(
-        "SELECT player_id, team_id, event_type, minute FROM match_events WHERE match_id = ?",
+        "SELECT player_id, team_id, event_type, minute, is_own_goal "
+        "FROM match_events WHERE match_id = ?",
         [match_id]
     )
 
@@ -503,7 +504,13 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
         else:
             mins = 0  # named in squad but didn't come on
 
-        goals    = evcount(pid, {"goal"})
+        # Own goals do NOT credit the scorer's goal tally — they're stored on
+        # the defender's row with is_own_goal=1, but only count toward the
+        # opposing team's score, never the player's stats.
+        goals    = sum(1 for e in events
+                       if e["player_id"] == pid
+                       and e["event_type"] == "goal"
+                       and not e["is_own_goal"])
         assists  = evcount(pid, {"assist"})
         yellow   = evcount(pid, {"yellow_card", "yellow_red_card"})
         red      = evcount(pid, {"red_card", "yellow_red_card"})

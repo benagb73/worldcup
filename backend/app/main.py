@@ -331,7 +331,10 @@ async def get_team(team_id: int):
         # Pull aggregate stats in one query keyed by player_id
         stat_rows = await db.fetchall("""
             SELECT player_id,
-                   COUNT(*)              AS apps,
+                   -- An appearance = the player actually got on the pitch
+                   -- (starter or sub-on). Players who sat the whole match
+                   -- on the bench don't count.
+                   SUM(CASE WHEN minutes_played > 0 THEN 1 ELSE 0 END) AS apps,
                    COALESCE(SUM(minutes_played), 0)    AS minutes_played,
                    COALESCE(SUM(goals), 0)             AS goals,
                    COALESCE(SUM(assists), 0)           AS assists,
@@ -670,7 +673,9 @@ async def get_leaderboard():
             SELECT
                 p.id  AS player_id, p.name AS player_name, p.shirt_number, p.position,
                 t.id  AS team_id, t.name AS team_name, t.code AS team_code, t.flag_url,
-                COUNT(*)                              AS apps,
+                -- Appearances = matches where the player actually got minutes
+                -- (starter or sub-on), never benchwarmer rows.
+                SUM(CASE WHEN pms.minutes_played > 0 THEN 1 ELSE 0 END) AS apps,
                 COALESCE(SUM(pms.minutes_played), 0)  AS minutes_played,
                 COALESCE(SUM(pms.goals), 0)           AS goals,
                 COALESCE(SUM(pms.assists), 0)         AS assists,

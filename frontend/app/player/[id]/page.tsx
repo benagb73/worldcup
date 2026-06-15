@@ -201,7 +201,7 @@ export default function PlayerPage({ params }: { params: Promise<{ id: string }>
             <h2 className="font-display text-3xl tracking-wide text-cream">Match Log</h2>
           </div>
           <div className="overflow-hidden rounded-2xl border border-white/10 panel">
-            <div className="hidden sm:grid grid-cols-[40px_1fr_repeat(6,minmax(0,52px))] items-center gap-2 border-b border-white/5 bg-black/30 px-4 py-2.5 text-[10px] font-bold tracking-widest text-cream/40">
+            <div className="hidden sm:grid grid-cols-[40px_1fr_repeat(6,minmax(0,52px))] items-center gap-2 border-b border-white/5 bg-black/80 backdrop-blur sticky top-0 z-20 px-4 py-2.5 text-[10px] font-bold tracking-widest text-cream/40">
               <span className="text-center">#</span>
               <span>ROLE</span>
               <span className="text-center">MIN</span>
