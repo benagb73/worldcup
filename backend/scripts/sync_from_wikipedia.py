@@ -301,6 +301,7 @@ async def diff_and_apply(
     apply: bool,
     *,
     full_sync: bool = False,
+    update_stats: bool = True,
 ) -> None:
     summary = {
         "team_updates": 0, "player_updates": 0,
@@ -405,6 +406,7 @@ async def diff_and_apply(
                     p, wp,
                     full_sync=full_sync,
                     clubs_by_norm=clubs_by_norm if full_sync else None,
+                    update_stats=update_stats,
                 )
                 if not changes:
                     continue
@@ -464,22 +466,30 @@ def _compute_player_changes(
     *,                              # forces keyword args
     full_sync: bool = False,
     clubs_by_norm: dict | None = None,
+    update_stats: bool = True,
 ) -> dict:
     """Return {field: (old, new)} for fields that differ.
 
     With full_sync=True, also overwrites DOB whenever Wikipedia has a value,
     and resolves the club name to a club_id when one's available in our clubs
     table.
+
+    With update_stats=False, leaves intl_caps_pre and intl_goals_pre alone for
+    existing DB players. Use this when re-running mid-tournament — Wikipedia
+    will have inflated those totals with matches that have already been played
+    in the tournament itself, which would double-count when our derived
+    intl_caps adds tour_apps on top.
     """
     changes: dict = {}
     if wiki["shirt_number"] is not None and wiki["shirt_number"] != db_row.get("shirt_number"):
         changes["shirt_number"] = (db_row.get("shirt_number"), wiki["shirt_number"])
     if wiki["position"] and wiki["position"] != db_row.get("position"):
         changes["position"] = (db_row.get("position"), wiki["position"])
-    if wiki["caps"] is not None and wiki["caps"] != (db_row.get("intl_caps_pre") or 0):
-        changes["intl_caps_pre"] = (db_row.get("intl_caps_pre"), wiki["caps"])
-    if wiki["goals"] is not None and wiki["goals"] != (db_row.get("intl_goals_pre") or 0):
-        changes["intl_goals_pre"] = (db_row.get("intl_goals_pre"), wiki["goals"])
+    if update_stats:
+        if wiki["caps"] is not None and wiki["caps"] != (db_row.get("intl_caps_pre") or 0):
+            changes["intl_caps_pre"] = (db_row.get("intl_caps_pre"), wiki["caps"])
+        if wiki["goals"] is not None and wiki["goals"] != (db_row.get("intl_goals_pre") or 0):
+            changes["intl_goals_pre"] = (db_row.get("intl_goals_pre"), wiki["goals"])
 
     # Date of birth: always overwrite in full_sync mode; otherwise only fill blanks
     if wiki["dob"]:
@@ -547,6 +557,12 @@ async def main():
     p.add_argument("--full-sync", action="store_true",
                    help="Trust Wikipedia fully: also overwrite DOB + club, "
                         "AND delete DB players not in the Wikipedia squad.")
+    p.add_argument("--no-update-stats", action="store_true",
+                   help="Leave intl_caps_pre / intl_goals_pre alone for existing "
+                        "DB players. Use this mid-tournament so Wikipedia's "
+                        "updated totals don't double-count with games already "
+                        "played in this tournament. New players inserted via "
+                        "--full-sync still get their initial values from Wikipedia.")
     p.add_argument("--html-file", help="Read HTML from a local file instead of fetching")
     args = p.parse_args()
 
@@ -559,7 +575,12 @@ async def main():
     parsed = parse_squads(html)
     print(f"\nParsed {len(parsed)} team sections from the page.")
 
-    await diff_and_apply(parsed, apply=args.apply, full_sync=args.full_sync)
+    await diff_and_apply(
+        parsed,
+        apply=args.apply,
+        full_sync=args.full_sync,
+        update_stats=not args.no_update_stats,
+    )
 
 
 if __name__ == "__main__":
