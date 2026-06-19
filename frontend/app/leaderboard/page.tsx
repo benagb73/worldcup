@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import clsx from 'clsx'
-import { useLeaderboard } from '@/lib/hooks'
-import { LeaderboardRow } from '@/lib/types'
+import { useLeaderboard, useTeamLeaderboard, useAttendanceSummary } from '@/lib/hooks'
+import { LeaderboardRow, TeamLeaderboardRow, AttendanceSummary } from '@/lib/types'
 
 type Direction = 'desc' | 'asc'
 
@@ -59,6 +59,8 @@ const COLUMNS: ColumnDef[] = [
 
 export default function LeaderboardPage() {
   const { data, isLoading } = useLeaderboard()
+  const { data: attendance } = useAttendanceSummary()
+  const [tab, setTab] = useState<'players' | 'teams'>('players')
   const [sortKey, setSortKey] = useState<string>('minutes_played')
   const [direction, setDirection] = useState<Direction>('desc')
   const [posFilter, setPosFilter] = useState<'ALL' | 'GK' | 'DEF' | 'MID' | 'FWD'>('ALL')
@@ -105,15 +107,35 @@ export default function LeaderboardPage() {
         <div className="relative px-6 py-10 sm:px-10 sm:py-12">
           <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">DATA</div>
           <h1 className="mt-1 font-display text-5xl tracking-tight text-cream sm:text-6xl">
-            PLAYER <span className="text-gold-gradient">LEADERBOARD</span>
+            STAT <span className="text-gold-gradient">LEADERBOARD</span>
           </h1>
           <p className="mt-3 max-w-xl text-sm text-cream/50">
-            Tournament totals for every player with at least one minute played. Click any column header to sort —
+            Tournament totals — flip between players and teams. Click any column header to sort,
             click again to reverse.
           </p>
+
+          {attendance && attendance.attendance_avg != null && (
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:max-w-2xl">
+              <AttendanceStat label="Matches" value={attendance.matches_with_attendance} />
+              <AttendanceStat label="Total attendance" value={attendance.attendance_total.toLocaleString()} />
+              <AttendanceStat label="Avg attendance"   value={attendance.attendance_avg.toLocaleString()} />
+              {attendance.fill_percent != null && (
+                <AttendanceStat label="Avg % full" value={`${attendance.fill_percent}%`} highlight />
+              )}
+            </div>
+          )}
         </div>
       </section>
 
+      {/* Tabs */}
+      <div className="-mx-4 sm:mx-0 bg-white/[0.02] border-y border-white/5 px-4 py-2 sm:rounded-full sm:border sm:px-1 sm:py-1 sm:flex sm:items-center sm:gap-1">
+        <LbTabButton active={tab==='players'} onClick={()=>setTab('players')}>PLAYERS</LbTabButton>
+        <LbTabButton active={tab==='teams'}   onClick={()=>setTab('teams')}>TEAMS</LbTabButton>
+      </div>
+
+      {tab === 'teams' && <TeamLeaderboardTable />}
+
+      {tab === 'players' && (<>
       {/* Filter pills */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-bold tracking-widest text-cream/40">POSITION</span>
@@ -185,7 +207,182 @@ export default function LeaderboardPage() {
           </div>
         </div>
       )}
+      </>)}
     </div>
+  )
+}
+
+function LbTabButton({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'inline-flex flex-1 items-center justify-center rounded-full px-4 py-2 text-xs font-bold tracking-widest transition-colors',
+        active
+          ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-400/30'
+          : 'text-cream/50 hover:text-cream hover:bg-white/5'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function AttendanceStat({ label, value, highlight }: {
+  label: string; value: string | number; highlight?: boolean
+}) {
+  return (
+    <div className={clsx(
+      'rounded-xl border px-3 py-2.5',
+      highlight ? 'border-amber-400/30 bg-amber-500/5' : 'border-white/10 bg-white/[0.03]'
+    )}>
+      <div className="text-[10px] font-bold tracking-widest text-cream/40">{label.toUpperCase()}</div>
+      <div className={clsx(
+        'mt-0.5 font-display text-2xl tabular-nums',
+        highlight ? 'text-gold-gradient' : 'text-cream'
+      )}>{value}</div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Team leaderboard — one row per team with attendance + team-aggregated stats
+// ---------------------------------------------------------------------------
+
+interface TeamColDef {
+  key: string
+  label: string
+  short: string
+  defaultDir: Direction
+  value: (r: TeamLeaderboardRow) => number
+  render?: (r: TeamLeaderboardRow) => React.ReactNode
+}
+
+const TEAM_COLS: TeamColDef[] = [
+  { key: 'matches_played',  label: 'Matches played', short: 'P',     defaultDir: 'desc', value: r => r.matches_played },
+  { key: 'goals_for',       label: 'Goals for',       short: 'GF',    defaultDir: 'desc', value: r => r.goals_for },
+  { key: 'goals_against',   label: 'Goals against',   short: 'GA',    defaultDir: 'asc',  value: r => r.goals_against },
+  { key: 'shots_total',     label: 'Shots',           short: 'SH',    defaultDir: 'desc', value: r => r.shots_total },
+  { key: 'shots_on_target', label: 'Shots on tgt',    short: 'SOT',   defaultDir: 'desc', value: r => r.shots_on_target },
+  { key: 'passes_attempted',label: 'Total passes',    short: 'PASS',  defaultDir: 'desc', value: r => r.passes_attempted,
+    render: r => r.passes_attempted.toLocaleString() },
+  { key: 'pass_accuracy',   label: 'Pass accuracy',   short: 'PS%',   defaultDir: 'desc', value: r => r.pass_accuracy ?? -1,
+    render: r => r.pass_accuracy != null ? `${r.pass_accuracy}%` : '–' },
+  { key: 'fouls_committed', label: 'Fouls committed', short: 'F-',    defaultDir: 'desc', value: r => r.fouls_committed },
+  { key: 'fouls_won',       label: 'Fouls won',       short: 'F+',    defaultDir: 'desc', value: r => r.fouls_won },
+  { key: 'yellow_cards',    label: 'Yellow cards',    short: 'Y',     defaultDir: 'desc', value: r => r.yellow_cards },
+  { key: 'red_cards',       label: 'Red cards',       short: 'R',     defaultDir: 'desc', value: r => r.red_cards },
+  { key: 'attendance_avg',  label: 'Avg attendance',  short: 'AVG',   defaultDir: 'desc', value: r => r.attendance_avg ?? -1,
+    render: r => r.attendance_avg != null ? r.attendance_avg.toLocaleString() : '–' },
+  { key: 'fill_percent',    label: 'Avg % full',      short: '% FULL', defaultDir: 'desc', value: r => r.fill_percent ?? -1,
+    render: r => r.fill_percent != null ? `${r.fill_percent}%` : '–' },
+]
+
+function TeamLeaderboardTable() {
+  const { data, isLoading } = useTeamLeaderboard()
+  const [sortKey, setSortKey] = useState<string>('goals_for')
+  const [direction, setDirection] = useState<Direction>('desc')
+  const sortDef = useMemo(() => TEAM_COLS.find(c => c.key === sortKey)!, [sortKey])
+
+  const sorted: TeamLeaderboardRow[] = useMemo(() => {
+    if (!data) return []
+    const arr = [...data]
+    arr.sort((a, b) => {
+      const va = sortDef.value(a)
+      const vb = sortDef.value(b)
+      return direction === 'desc' ? vb - va : va - vb
+    })
+    return arr
+  }, [data, sortKey, direction, sortDef])
+
+  function clickHeader(c: TeamColDef) {
+    if (c.key === sortKey) setDirection(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSortKey(c.key); setDirection(c.defaultDir) }
+  }
+
+  if (isLoading) return <div className="h-96 rounded-2xl shimmer" />
+  if (!sorted.length) {
+    return (
+      <div className="rounded-2xl border border-dashed border-white/10 panel py-12 text-center text-sm text-cream/50">
+        No team has played a finished match yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-clip rounded-2xl border border-white/10 panel">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm landscape:min-w-[1100px] sm:min-w-[1100px]">
+          <thead className="bg-black/80 backdrop-blur sticky top-0 z-20">
+            <tr className="text-[10px] font-bold tracking-widest text-cream/40">
+              <th className="px-3 py-2 text-left sticky left-0 z-10 bg-black/40 min-w-[200px]">TEAM</th>
+              {TEAM_COLS.map(c => (
+                <th key={c.key} className="px-2 py-2 text-center whitespace-nowrap">
+                  <button
+                    onClick={() => clickHeader(c)}
+                    className={clsx(
+                      'inline-flex items-center gap-1 transition-colors hover:text-cream',
+                      sortKey === c.key ? 'text-amber-400' : 'text-cream/40'
+                    )}
+                    title={c.label}
+                  >
+                    {c.short}
+                    {sortKey === c.key && (
+                      <span className="text-amber-400">{direction === 'desc' ? '↓' : '↑'}</span>
+                    )}
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {sorted.map((row, i) => (
+              <TeamRow key={row.team_id} row={row} rank={i + 1} sortKey={sortKey} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function TeamRow({ row, rank, sortKey }: { row: TeamLeaderboardRow; rank: number; sortKey: string }) {
+  return (
+    <tr className="transition-colors hover:bg-white/[0.03]">
+      <td className="px-3 py-2 sticky left-0 z-10 bg-ink/95">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="font-mono text-xs text-cream/40 w-6 text-right">{rank}</span>
+          <Link href={`/team/${row.team_id}`} className="shrink-0" title={row.team_name}>
+            {row.flag_url ? (
+              <Image src={row.flag_url} alt={row.team_code} width={20} height={14}
+                     className="h-3.5 w-5 rounded-sm object-cover ring-1 ring-black/40 transition-transform hover:scale-110"
+                     unoptimized />
+            ) : (
+              <span className="h-3.5 w-5 block rounded-sm bg-white/10 ring-1 ring-black/40" />
+            )}
+          </Link>
+          <Link href={`/team/${row.team_id}`}
+                className="truncate text-sm font-semibold text-cream hover:text-gold transition-colors">
+            {row.team_name}
+          </Link>
+          <span className="font-mono text-[10px] text-cream/40">{row.team_code}</span>
+        </div>
+      </td>
+      {TEAM_COLS.map(c => {
+        const isActive = sortKey === c.key
+        const rendered = c.render ? c.render(row) : c.value(row)
+        return (
+          <td key={c.key} className={clsx(
+            'px-2 py-2 text-center font-mono text-xs tabular-nums whitespace-nowrap',
+            isActive ? 'text-amber-400 font-bold' : 'text-cream/60'
+          )}>
+            {rendered}
+          </td>
+        )
+      })}
+    </tr>
   )
 }
 

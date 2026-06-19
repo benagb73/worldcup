@@ -52,6 +52,7 @@ class MatchUpdate(BaseModel):
     pen_home: Optional[int] = None
     pen_away: Optional[int] = None
     winner_id: Optional[int] = None       # explicit override; recalculated otherwise
+    attendance: Optional[int] = None      # paid attendance (0 means clear it)
     auto_recalc_standings: bool = True    # rebuild group standings after a final score
 
 
@@ -162,13 +163,16 @@ async def list_matches_for_admin():
                    m.status,
                    m.ht_home, m.ht_away, m.ft_home, m.ft_away,
                    m.et_home, m.et_away, m.pen_home, m.pen_away, m.winner_id,
+                   m.attendance,
                    ht.id   AS home_id,   ht.name AS home_name, ht.code AS home_code,
                    ht.flag_url AS home_flag,
                    at.id   AS away_id,   at.name AS away_name, at.code AS away_code,
-                   at.flag_url AS away_flag
+                   at.flag_url AS away_flag,
+                   v.capacity AS venue_capacity
             FROM matches m
             LEFT JOIN teams ht ON m.home_team_id = ht.id
             LEFT JOIN teams at ON m.away_team_id = at.id
+            LEFT JOIN venues v ON m.venue_id     = v.id
             ORDER BY m.scheduled_at
         """)
     return rows
@@ -192,6 +196,13 @@ async def update_match(match_id: int, body: MatchUpdate):
             "et_away":  body.et_away  if body.et_away  is not None else match["et_away"],
             "pen_home": body.pen_home if body.pen_home is not None else match["pen_home"],
             "pen_away": body.pen_away if body.pen_away is not None else match["pen_away"],
+            # Attendance: 0 → clear back to NULL so % full hides; any other
+            # int stays as-is. None means "don't touch" (typical PATCH).
+            "attendance": (
+                None if body.attendance == 0
+                else body.attendance if body.attendance is not None
+                else match.get("attendance")
+            ),
         }
 
         # Derive winner_id when status is final, unless user provided one explicitly
@@ -210,6 +221,7 @@ async def update_match(match_id: int, body: MatchUpdate):
                 et_home  = ?, et_away  = ?,
                 pen_home = ?, pen_away = ?,
                 winner_id = ?,
+                attendance = ?,
                 updated_at = datetime('now')
             WHERE id = ?
         """, [merged["status"],
@@ -217,7 +229,7 @@ async def update_match(match_id: int, body: MatchUpdate):
               merged["ft_home"], merged["ft_away"],
               merged["et_home"], merged["et_away"],
               merged["pen_home"], merged["pen_away"],
-              winner_id, match_id])
+              winner_id, merged["attendance"], match_id])
 
         # Recompute group standings if the match has a group and is final
         if body.auto_recalc_standings and merged["status"] == "final" and match["group_name"]:

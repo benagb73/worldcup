@@ -138,4 +138,23 @@ async def init_db():
         sql = f.read()
     async with get_db() as db:
         await db.execute_script(sql)
+        await _run_migrations(db)
     print(f"[OK] Database initialised ({'Turso' if _USE_TURSO else 'SQLite'})")
+
+
+async def _run_migrations(db) -> None:
+    """Idempotent ALTER TABLE migrations for columns added after a DB was
+    first created. CREATE TABLE IF NOT EXISTS in schema.sql doesn't re-add
+    columns to an existing table, so any new column has to be ALTERed in
+    here too. Safe to re-run — each migration checks PRAGMA table_info first.
+    """
+    needed = [
+        # (table, column, type+default)
+        ("matches", "attendance", "INTEGER"),
+    ]
+    for table, col, decl in needed:
+        cols = await db.fetchall(f"PRAGMA table_info({table})")
+        if any(c["name"] == col for c in cols):
+            continue
+        print(f"[migrate] {table}.{col} {decl}")
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")

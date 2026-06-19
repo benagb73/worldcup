@@ -62,6 +62,14 @@ export function useLeaderboard() {
   return useSWR(`${API}/api/leaderboard`, fetcher, { refreshInterval: LIVE_REFRESH })
 }
 
+export function useTeamLeaderboard() {
+  return useSWR(`${API}/api/team-leaderboard`, fetcher, { refreshInterval: LIVE_REFRESH })
+}
+
+export function useAttendanceSummary() {
+  return useSWR(`${API}/api/attendance-summary`, fetcher, { refreshInterval: LIVE_REFRESH })
+}
+
 // ---- Competition ---------------------------------------------------------
 
 export function useCompetitors() {

@@ -103,6 +103,7 @@ class MatchSummary(BaseModel):
     score: MatchScore
     winner_id: Optional[int]
     venue: Optional[Venue]
+    attendance: Optional[int] = None     # paid attendance once known
 
 
 # ---------------------------------------------------------------------------
@@ -179,11 +180,29 @@ class PlayerMatchStats(BaseModel):
 # Full match detail (used by the match page)
 # ---------------------------------------------------------------------------
 
+class TeamMatchStats(BaseModel):
+    """Per-team aggregate for a single match — summed from
+    player_match_stats rows for the team. Goals come from match events
+    (so own goals credit the correct side, not the player's stats row)."""
+    team_id: int
+    goals: int
+    yellow_cards: int
+    red_cards: int
+    passes_attempted: int
+    passes_completed: int
+    pass_accuracy: Optional[int]      # 0..100, None if no passes recorded yet
+    shots_total: int
+    shots_on_target: int
+    fouls_committed: int
+    fouls_won: int
+
+
 class MatchDetail(BaseModel):
     match: MatchSummary
     lineups: list[MatchLineup]        # [home, away]
     events: list[MatchEvent]
     stats: list[PlayerMatchStats]
+    team_stats: list[TeamMatchStats] = []   # [home, away] when both teams are set
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +242,35 @@ class PlayerTournamentTotals(BaseModel):
     goals_conceded: int        # mostly for GK
 
 
+class TeamTournamentTotals(BaseModel):
+    """Aggregated team-level stats across every played match.
+    Goals/conceded come from match results; the rest is summed from
+    player_match_stats rows belonging to the team."""
+    matches_played: int
+    goals_for: int
+    goals_against: int
+    yellow_cards: int
+    red_cards: int
+    passes_attempted: int
+    passes_completed: int
+    pass_accuracy: Optional[int]
+    shots_total: int
+    shots_on_target: int
+    fouls_committed: int
+    fouls_won: int
+    attendance_total: int = 0
+    attendance_avg: Optional[int] = None     # avg over matches with a recorded attendance
+    capacity_total: int = 0                  # sum of venue capacities for those matches
+    capacity_avg: Optional[int] = None
+    fill_percent: Optional[int] = None       # avg % full across those matches
+
+
 class TeamDetail(BaseModel):
     team: Team
     standing: Optional[StandingRow]   # None for knockout-only teams
     fixtures: list[MatchSummary]
     squad: list[PlayerTournamentTotals]
+    totals: Optional[TeamTournamentTotals] = None
 
 
 # ---------------------------------------------------------------------------
@@ -258,3 +301,40 @@ class LeaderboardRow(BaseModel):
     red_cards: int
     saves: int
     goals_conceded: int
+
+
+
+# ---------------------------------------------------------------------------
+# Team leaderboard Ã¢ÂÂ one row per team, used on /leaderboard "Teams" tab
+# ---------------------------------------------------------------------------
+
+class TeamLeaderboardRow(BaseModel):
+    team_id: int
+    team_name: str
+    team_code: str
+    flag_url: Optional[str]
+    matches_played: int
+    goals_for: int
+    goals_against: int
+    yellow_cards: int
+    red_cards: int
+    passes_attempted: int
+    passes_completed: int
+    pass_accuracy: Optional[int]
+    shots_total: int
+    shots_on_target: int
+    fouls_committed: int
+    fouls_won: int
+    attendance_total: int
+    attendance_avg: Optional[int]
+    capacity_total: int
+    fill_percent: Optional[int]
+
+
+class AttendanceSummary(BaseModel):
+    """Tournament-wide attendance/% full headline for /leaderboard."""
+    matches_with_attendance: int
+    attendance_total: int
+    attendance_avg: Optional[int]
+    capacity_total: int
+    fill_percent: Optional[int]

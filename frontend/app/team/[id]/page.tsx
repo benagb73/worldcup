@@ -5,7 +5,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import clsx from 'clsx'
 import { useTeam } from '@/lib/hooks'
-import { TeamDetail, PlayerTournamentTotals, MatchSummary } from '@/lib/types'
+import { TeamDetail, PlayerTournamentTotals, MatchSummary, TeamTournamentTotals } from '@/lib/types'
 import { MatchCard } from '@/components/MatchCard'
 
 const POS_ORDER = ['GK', 'DEF', 'MID', 'FWD'] as const
@@ -30,7 +30,7 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
   if (!data) return <div className="py-20 text-center text-cream/40">Team not found</div>
 
   const detail: TeamDetail = data
-  const { team, standing, fixtures, squad } = detail
+  const { team, standing, fixtures, squad, totals } = detail
 
   // Bucket squad by position
   const buckets: Record<string, PlayerTournamentTotals[]> = { GK: [], DEF: [], MID: [], FWD: [], OTHER: [] }
@@ -79,6 +79,13 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
           <div className="space-y-3">
             {played.map(m => <MatchCard key={m.id} match={m} />)}
           </div>
+        </section>
+      )}
+
+      {totals && totals.matches_played > 0 && (
+        <section>
+          <SectionHeading eyebrow="COMBINED" title="Team Totals" />
+          <TeamTotalsPanel totals={totals} />
         </section>
       )}
 
@@ -287,6 +294,62 @@ function PlayerRow({ entry, isGK }: { entry: PlayerTournamentTotals; isGK: boole
 
       <span className="text-cream/30 sm:hidden">→</span>
     </Link>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Team totals panel
+// ---------------------------------------------------------------------------
+
+function TeamTotalsPanel({ totals }: { totals: TeamTournamentTotals }) {
+  return (
+    <div className="rounded-2xl border border-white/10 panel p-5 sm:p-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <TotalBox label="Played"          value={totals.matches_played} />
+        <TotalBox label="Goals For"       value={totals.goals_for}      highlight={totals.goals_for > 0} />
+        <TotalBox label="Goals Against"   value={totals.goals_against}  danger={totals.goals_against > 0} />
+        <TotalBox label="Shots"           value={totals.shots_total}    sublabel={totals.shots_on_target > 0 ? `${totals.shots_on_target} on tgt` : undefined} />
+        <TotalBox label="Total Passes"    value={totals.passes_attempted.toLocaleString()} sublabel={totals.passes_completed > 0 ? `${totals.passes_completed.toLocaleString()} done` : undefined} />
+        <TotalBox label="Pass Acc"        value={totals.pass_accuracy != null ? `${totals.pass_accuracy}%` : '—'} highlight={(totals.pass_accuracy ?? 0) >= 85} />
+        <TotalBox label="Fouls Won"       value={totals.fouls_won} />
+        <TotalBox label="Fouls Cmt"       value={totals.fouls_committed} />
+        <TotalBox label="Yellow Cards"    value={totals.yellow_cards}   warn={totals.yellow_cards > 0} />
+        <TotalBox label="Red Cards"       value={totals.red_cards}      danger={totals.red_cards > 0} />
+        {totals.attendance_avg != null && (
+          <TotalBox label="Avg Attendance" value={totals.attendance_avg.toLocaleString()} />
+        )}
+        {totals.fill_percent != null && (
+          <TotalBox label="Avg % Full"     value={`${totals.fill_percent}%`} highlight={totals.fill_percent >= 90} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TotalBox({ label, value, sublabel, highlight, warn, danger }: {
+  label: string; value: number | string; sublabel?: string
+  highlight?: boolean; warn?: boolean; danger?: boolean
+}) {
+  return (
+    <div className={clsx(
+      'relative overflow-hidden rounded-xl border p-3 text-center transition-colors',
+      highlight ? 'border-amber-400/30 bg-amber-500/5' :
+      warn      ? 'border-amber-400/30 bg-amber-500/5' :
+      danger    ? 'border-live/30 bg-live/5' :
+      'border-white/10 bg-white/[0.03]'
+    )}>
+      <div className={clsx(
+        'font-display text-2xl leading-none tracking-tight tabular-nums sm:text-3xl',
+        highlight ? 'text-gold-gradient' :
+        warn      ? 'text-amber-400' :
+        danger    ? 'text-live' :
+        'text-cream'
+      )}>
+        {value}
+      </div>
+      {sublabel && <div className="mt-1 text-[10px] font-mono text-cream/40">{sublabel}</div>}
+      <div className="mt-1 text-[10px] font-bold tracking-widest text-cream/40">{label.toUpperCase()}</div>
+    </div>
   )
 }
 

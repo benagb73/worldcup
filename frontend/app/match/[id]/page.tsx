@@ -1,27 +1,38 @@
 'use client'
 
-import { use } from 'react'
+import { use, useState } from 'react'
 import { useMatch } from '@/lib/hooks'
-import { MatchDetail, MatchEvent, LineupPlayer, PlayerMatchStats, MatchLineup, Team } from '@/lib/types'
+import { MatchDetail, MatchEvent, LineupPlayer, PlayerMatchStats, MatchLineup, Team, TeamMatchStats } from '@/lib/types'
 import { displayScore, formatKickoff, formatMinute, positionOrder, stageName } from '@/lib/utils'
 import Image from 'next/image'
 import Link from 'next/link'
 import clsx from 'clsx'
 
+type TabKey = 'timeline' | 'lineups' | 'players' | 'team'
+
 export default function MatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { data, isLoading } = useMatch(id)
+  // Tab state declared BEFORE early returns so hook count stays stable.
+  const [tab, setTab] = useState<TabKey>('timeline')
 
   if (isLoading) return <MatchSkeleton />
   if (!data) return <div className="text-center text-cream/40 py-20">Match not found</div>
 
   const detail: MatchDetail = data
-  const { match, lineups, events, stats } = detail
+  const { match, lineups, events, stats, team_stats } = detail
   const homeId = match.home_team?.id ?? -1
   const awayId = match.away_team?.id ?? -1
 
   const homeLineup = match.home_team ? lineups.find(l => l.team.id === homeId) : undefined
   const awayLineup = match.away_team ? lineups.find(l => l.team.id === awayId) : undefined
+  const homeTeamStats = team_stats?.find(t => t.team_id === homeId)
+  const awayTeamStats = team_stats?.find(t => t.team_id === awayId)
+
+  const hasTimeline = events.length > 0 && match.home_team && match.away_team
+  const hasLineups  = !!(homeLineup || awayLineup)
+  const hasPlayers  = stats.length > 0
+  const hasTeam     = !!(homeTeamStats || awayTeamStats)
 
   return (
     <div className="space-y-10 sm:space-y-14">
@@ -46,16 +57,26 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
         </div>
       )}
 
+      {/* Tabs */}
+      {(hasTimeline || hasLineups || hasPlayers || hasTeam) && (
+        <div className="-mx-4 sm:mx-0 bg-white/[0.02] border-y border-white/5 px-4 py-2 sm:rounded-full sm:border sm:px-1 sm:py-1 sm:flex sm:items-center sm:gap-1 sm:bg-white/[0.02]">
+          {hasTimeline && <MatchTabButton active={tab==='timeline'} onClick={()=>setTab('timeline')}>TIMELINE</MatchTabButton>}
+          {hasLineups  && <MatchTabButton active={tab==='lineups'}  onClick={()=>setTab('lineups')}>LINEUPS</MatchTabButton>}
+          {hasPlayers  && <MatchTabButton active={tab==='players'}  onClick={()=>setTab('players')}>PLAYERS</MatchTabButton>}
+          {hasTeam     && <MatchTabButton active={tab==='team'}     onClick={()=>setTab('team')}>TEAM STATS</MatchTabButton>}
+        </div>
+      )}
+
       {/* Visual timeline */}
-      {events.length > 0 && match.home_team && match.away_team && (
+      {tab === 'timeline' && hasTimeline && (
         <section>
           <SectionHeading eyebrow="MINUTE BY MINUTE" title="Match Timeline" />
-          <Timeline events={events} homeId={homeId} awayId={awayId} homeTeam={match.home_team} awayTeam={match.away_team} />
+          <Timeline events={events} homeId={homeId} awayId={awayId} homeTeam={match.home_team!} awayTeam={match.away_team!} />
         </section>
       )}
 
       {/* Pitch lineups */}
-      {(homeLineup || awayLineup) && (
+      {tab === 'lineups' && hasLineups && (
         <section>
           <SectionHeading eyebrow="STARTING XI" title="Lineups" />
           <div className="grid gap-6 lg:grid-cols-2">
@@ -72,7 +93,7 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
       )}
 
       {/* Player stats with bar charts */}
-      {stats.length > 0 && (
+      {tab === 'players' && hasPlayers && (
         <section>
           <SectionHeading eyebrow="DATA" title="Player Statistics" />
           <div className="grid gap-6 lg:grid-cols-2">
@@ -85,8 +106,123 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
           </div>
         </section>
       )}
+
+      {/* Team-level aggregated stats — head-to-head bars */}
+      {tab === 'team' && hasTeam && match.home_team && match.away_team && (
+        <section>
+          <SectionHeading eyebrow="HEAD TO HEAD" title="Team Stats" />
+          <TeamStatsCompare
+            home={homeTeamStats}
+            away={awayTeamStats}
+            homeTeam={match.home_team}
+            awayTeam={match.away_team}
+          />
+        </section>
+      )}
     </div>
   )
+}
+
+function MatchTabButton({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'inline-flex flex-1 items-center justify-center rounded-full px-4 py-2 text-xs font-bold tracking-widest transition-colors',
+        active
+          ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-400/30'
+          : 'text-cream/50 hover:text-cream hover:bg-white/5'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Team stats — head-to-head comparison bars
+// ---------------------------------------------------------------------------
+
+function TeamStatsCompare({ home, away, homeTeam, awayTeam }: {
+  home: TeamMatchStats | undefined
+  away: TeamMatchStats | undefined
+  homeTeam: Team
+  awayTeam: Team
+}) {
+  // Use 0 fallback so the row still renders if one side has no data yet
+  const h = home ?? blankTeamStats()
+  const a = away ?? blankTeamStats()
+
+  const rows: { label: string; h: string | number; a: string | number; max: number }[] = [
+    { label: 'Goals',          h: h.goals,            a: a.goals,            max: Math.max(h.goals, a.goals, 1) },
+    { label: 'Shots',          h: h.shots_total,      a: a.shots_total,      max: Math.max(h.shots_total, a.shots_total, 1) },
+    { label: 'Shots on target',h: h.shots_on_target,  a: a.shots_on_target,  max: Math.max(h.shots_on_target, a.shots_on_target, 1) },
+    { label: 'Total passes',   h: h.passes_attempted, a: a.passes_attempted, max: Math.max(h.passes_attempted, a.passes_attempted, 1) },
+    { label: 'Pass accuracy',
+      h: h.pass_accuracy != null ? `${h.pass_accuracy}%` : '—',
+      a: a.pass_accuracy != null ? `${a.pass_accuracy}%` : '—',
+      max: 100 },
+    { label: 'Fouls committed',h: h.fouls_committed,  a: a.fouls_committed,  max: Math.max(h.fouls_committed, a.fouls_committed, 1) },
+    { label: 'Fouls won',      h: h.fouls_won,        a: a.fouls_won,        max: Math.max(h.fouls_won, a.fouls_won, 1) },
+    { label: 'Yellow cards',   h: h.yellow_cards,     a: a.yellow_cards,     max: Math.max(h.yellow_cards, a.yellow_cards, 1) },
+    { label: 'Red cards',      h: h.red_cards,        a: a.red_cards,        max: Math.max(h.red_cards, a.red_cards, 1) },
+  ]
+
+  return (
+    <div className="rounded-2xl border border-white/10 panel p-5 sm:p-7">
+      {/* Header strip with team codes */}
+      <div className="mb-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-[10px] font-bold tracking-widest text-cream/40">
+        <div className="text-right text-cream">{homeTeam.code}</div>
+        <div className="px-2">STAT</div>
+        <div className="text-left text-cream">{awayTeam.code}</div>
+      </div>
+      <div className="space-y-3">
+        {rows.map(r => {
+          // Bars proportional to the bigger side; the value text is what
+          // actually says how many. For pass accuracy we use 100 as the cap.
+          const hNum = typeof r.h === 'number' ? r.h : parseInt(String(r.h), 10) || 0
+          const aNum = typeof r.a === 'number' ? r.a : parseInt(String(r.a), 10) || 0
+          const hPct = r.max ? Math.min(100, Math.round((hNum / r.max) * 100)) : 0
+          const aPct = r.max ? Math.min(100, Math.round((aNum / r.max) * 100)) : 0
+          const hWin = hNum > aNum
+          const aWin = aNum > hNum
+          return (
+            <div key={r.label} className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div className="flex items-center justify-end gap-2 min-w-0">
+                <span className={clsx('font-mono text-sm tabular-nums', hWin ? 'text-amber-400 font-bold' : 'text-cream/70')}>
+                  {r.h}
+                </span>
+                <div className="h-2 flex-1 max-w-[180px] rounded-full bg-white/5 overflow-hidden">
+                  <div className={clsx('h-full rounded-full ml-auto', hWin ? 'bg-amber-400' : 'bg-cream/30')} style={{ width: `${hPct}%` }} />
+                </div>
+              </div>
+              <div className="text-center text-[10px] font-bold tracking-widest text-cream/50 whitespace-nowrap px-2">
+                {r.label.toUpperCase()}
+              </div>
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="h-2 flex-1 max-w-[180px] rounded-full bg-white/5 overflow-hidden">
+                  <div className={clsx('h-full rounded-full', aWin ? 'bg-amber-400' : 'bg-cream/30')} style={{ width: `${aPct}%` }} />
+                </div>
+                <span className={clsx('font-mono text-sm tabular-nums', aWin ? 'text-amber-400 font-bold' : 'text-cream/70')}>
+                  {r.a}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function blankTeamStats(): TeamMatchStats {
+  return {
+    team_id: 0, goals: 0, yellow_cards: 0, red_cards: 0,
+    passes_attempted: 0, passes_completed: 0, pass_accuracy: null,
+    shots_total: 0, shots_on_target: 0, fouls_committed: 0, fouls_won: 0,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +256,21 @@ function CinematicScoreHeader({ match }: { match: MatchDetail['match'] }) {
             </span>
           )}
         </div>
+
+        {/* Attendance strip — only when admin has entered it */}
+        {match.attendance != null && (
+          <div className="flex items-center justify-end gap-3 border-b border-white/5 bg-black/20 px-5 py-2 text-[10px] font-bold tracking-[0.2em] text-cream/50">
+            <span>ATTENDANCE</span>
+            <span className="font-mono text-cream tabular-nums tracking-normal">
+              {match.attendance.toLocaleString()}
+            </span>
+            {match.venue?.capacity != null && (
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-400">
+                {Math.round((match.attendance / match.venue.capacity) * 100)}% FULL
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-10 sm:px-8 sm:py-14">
           {match.home_team

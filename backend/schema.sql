@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS matches (
   pen_away        INTEGER,
 
   winner_id       INTEGER REFERENCES teams(id),  -- NULL until decided
+  attendance      INTEGER,            -- official paid attendance (admin-entered)
   created_at      TEXT DEFAULT (datetime('now')),
   updated_at      TEXT DEFAULT (datetime('now'))
 );

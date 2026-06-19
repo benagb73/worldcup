@@ -54,6 +54,7 @@ export interface MatchSummary {
   score: MatchScore
   winner_id: number | null
   venue: { id: number; name: string; city: string; country: string; capacity: number | null; number_games: number | null } | null
+  attendance: number | null
 }
 
 export interface MatchEvent {
@@ -112,11 +113,26 @@ export interface PlayerMatchStats {
   penalty_saves: number
 }
 
+export interface TeamMatchStats {
+  team_id: number
+  goals: number
+  yellow_cards: number
+  red_cards: number
+  passes_attempted: number
+  passes_completed: number
+  pass_accuracy: number | null
+  shots_total: number
+  shots_on_target: number
+  fouls_committed: number
+  fouls_won: number
+}
+
 export interface MatchDetail {
   match: MatchSummary
   lineups: MatchLineup[]
   events: MatchEvent[]
   stats: PlayerMatchStats[]
+  team_stats: TeamMatchStats[]
 }
 
 export interface StandingRow {
@@ -181,11 +197,63 @@ export interface LeaderboardRow {
   goals_conceded: number
 }
 
+export interface TeamTournamentTotals {
+  matches_played: number
+  goals_for: number
+  goals_against: number
+  yellow_cards: number
+  red_cards: number
+  passes_attempted: number
+  passes_completed: number
+  pass_accuracy: number | null
+  shots_total: number
+  shots_on_target: number
+  fouls_committed: number
+  fouls_won: number
+  attendance_total: number
+  attendance_avg: number | null
+  capacity_total: number
+  capacity_avg: number | null
+  fill_percent: number | null
+}
+
 export interface TeamDetail {
   team: Team
   standing: StandingRow | null
   fixtures: MatchSummary[]
   squad: PlayerTournamentTotals[]
+  totals: TeamTournamentTotals | null
+}
+
+export interface TeamLeaderboardRow {
+  team_id: number
+  team_name: string
+  team_code: string
+  flag_url: string | null
+  matches_played: number
+  goals_for: number
+  goals_against: number
+  yellow_cards: number
+  red_cards: number
+  passes_attempted: number
+  passes_completed: number
+  pass_accuracy: number | null
+  shots_total: number
+  shots_on_target: number
+  fouls_committed: number
+  fouls_won: number
+  attendance_total: number
+  attendance_avg: number | null
+  capacity_total: number
+  fill_percent: number | null
+}
+
+export interface AttendanceSummary {
+  matches_with_attendance: number
+  attendance_total: number
+  attendance_avg: number | null
+  capacity_total: number
+  fill_percent: number | null
 }
 
 // ---------------------------------------------------------------------------

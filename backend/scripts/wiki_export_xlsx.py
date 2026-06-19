@@ -191,7 +191,7 @@ def country_to_code(name: str | None) -> str:
 
 CLUB_HEADERS   = ["name", "country", "league"]
 PLAYER_HEADERS = ["team_code", "club_name", "name", "shirt_number",
-                  "position", "date_of_birth"]
+                  "position", "date_of_birth", "caps", "goals"]
 
 
 def _ensure_sheet(wb, name: str, headers: list[str]):
@@ -296,6 +296,8 @@ def main() -> None:
                 wp.get("shirt_number"),
                 wp.get("position"),
                 wp.get("dob"),
+                wp.get("caps")  or 0,
+                wp.get("goals") or 0,
             ))
 
     print(f"\n--- Summary ---")

@@ -44,7 +44,8 @@ SHEETS: dict[str, list[str]] = {
     "teams":   ["name", "code", "group_name", "flag_url", "world_rank"],
     "venues":  ["name", "city", "country", "capacity", "number_games"],
     "clubs":   ["name", "country", "league"],   # country is 3-letter code
-    "players": ["team_code", "club_name", "name", "shirt_number", "position", "date_of_birth"],
+    "players": ["team_code", "club_name", "name", "shirt_number", "position",
+                "date_of_birth", "caps", "goals"],
     "matches": ["match_number", "stage", "group_name", "scheduled_at",
                 "home_team_code", "away_team_code", "venue_name"],
     "bracket": ["stage", "slot", "home_seed_desc", "away_seed_desc"],
@@ -363,11 +364,18 @@ async def import_workbook(xlsx_path: Path) -> None:
             shirt = p.get("shirt_number")
             shirt = int(shirt) if shirt not in (None, "") else None
             dob   = _normalise_dob(p.get("date_of_birth"))
+            caps  = p.get("caps")
+            caps  = int(caps)  if caps  not in (None, "") else 0
+            goals = p.get("goals")
+            goals = int(goals) if goals not in (None, "") else 0
 
             await db.execute(
-                "INSERT INTO players (team_id, club_id, name, shirt_number, position, date_of_birth, club_status) "
-                "VALUES (?,?,?,?,?,?,?)",
-                [tid, cid, p["name"], shirt, p.get("position"), dob, club_status]
+                "INSERT INTO players "
+                "(team_id, club_id, name, shirt_number, position, date_of_birth, "
+                " club_status, intl_caps_pre, intl_goals_pre) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                [tid, cid, p["name"], shirt, p.get("position"), dob,
+                 club_status, caps, goals]
             )
             n_players += 1
         print(f"      players      -> {n_players} inserted ({n_skipped_players} skipped) "

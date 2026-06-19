@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.connection import get_db, init_db
 from app.models.schemas import (
+    AttendanceSummary,
     BracketSlot,
     GroupStandings,
     MatchDetail,
@@ -24,6 +25,9 @@ from app.models.schemas import (
     StandingRow,
     Team,
     TeamDetail,
+    TeamLeaderboardRow,
+    TeamMatchStats,
+    TeamTournamentTotals,
     Club,
     Venue,
     MatchScore,
@@ -164,13 +168,14 @@ async def _build_match_summary(row: dict) -> MatchSummary:
             capacity=row.get("venue_capacity"),
             number_games=row.get("venue_games"),
         ) if row.get("venue_id") else None,
+        attendance=row.get("attendance"),
     )
 
 
 MATCH_SELECT = """
     SELECT
         m.id, m.stage, m.group_name, m.match_number, m.scheduled_at,
-        m.status, m.winner_id,
+        m.status, m.winner_id, m.attendance,
         m.ht_home, m.ht_away, m.ft_home, m.ft_away,
         m.et_home, m.et_away, m.pen_home, m.pen_away,
         ht.id   AS home_id,   ht.name AS home_name,
@@ -393,7 +398,84 @@ async def get_team(team_id: int):
                 goals_conceded=t.get("goals_conceded", 0),
             ))
 
-    return TeamDetail(team=team, standing=standing, fixtures=fixtures, squad=squad)
+        # ---- Team-wide aggregate totals across played matches ---------
+        totals = await _build_team_totals(db, team_id)
+
+    return TeamDetail(team=team, standing=standing, fixtures=fixtures,
+                      squad=squad, totals=totals)
+
+
+async def _build_team_totals(db, team_id: int) -> Optional[TeamTournamentTotals]:
+    """Sum the team's player_match_stats rows + goals from match events +
+    attendance/capacity from played matches. Returns None if the team hasn't
+    played any finished matches yet."""
+    agg = await db.fetchone("""
+        SELECT
+            COALESCE(SUM(passes_attempted), 0) AS pa,
+            COALESCE(SUM(passes_completed), 0) AS pc,
+            COALESCE(SUM(yellow_cards), 0)     AS yc,
+            COALESCE(SUM(red_cards), 0)        AS rc,
+            COALESCE(SUM(shots_total), 0)      AS sh,
+            COALESCE(SUM(shots_on_target), 0)  AS sot,
+            COALESCE(SUM(fouls_committed), 0)  AS fc,
+            COALESCE(SUM(fouls_won), 0)        AS fw
+        FROM player_match_stats
+        WHERE team_id = ?
+    """, [team_id])
+
+    # Played matches = either side of a final match. Used for matches_played,
+    # goals_for / against, and attendance/capacity averages.
+    played = await db.fetchall("""
+        SELECT m.id, m.home_team_id, m.away_team_id,
+               m.ft_home, m.ft_away, m.et_home, m.et_away,
+               m.attendance, v.capacity AS venue_capacity
+        FROM matches m
+        LEFT JOIN venues v ON m.venue_id = v.id
+        WHERE m.status = 'final'
+          AND (m.home_team_id = ? OR m.away_team_id = ?)
+    """, [team_id, team_id])
+
+    if not played and (agg["pa"] or 0) == 0:
+        return None
+
+    gf, ga = 0, 0
+    att_total, cap_total, fill_matches = 0, 0, 0
+    att_match_count = 0
+    for m in played:
+        h_eff = m["et_home"] if m["et_home"] is not None else (m["ft_home"] or 0)
+        a_eff = m["et_away"] if m["et_away"] is not None else (m["ft_away"] or 0)
+        if m["home_team_id"] == team_id:
+            gf += h_eff; ga += a_eff
+        else:
+            gf += a_eff; ga += h_eff
+        if m["attendance"] is not None:
+            att_total += m["attendance"]
+            att_match_count += 1
+            if m["venue_capacity"]:
+                cap_total += m["venue_capacity"]
+                fill_matches += 1
+
+    pa = agg["pa"] or 0
+    pc = agg["pc"] or 0
+    return TeamTournamentTotals(
+        matches_played=len(played),
+        goals_for=gf,
+        goals_against=ga,
+        yellow_cards=agg["yc"] or 0,
+        red_cards=agg["rc"] or 0,
+        passes_attempted=pa,
+        passes_completed=pc,
+        pass_accuracy=(round(pc / pa * 100) if pa > 0 else None),
+        shots_total=agg["sh"] or 0,
+        shots_on_target=agg["sot"] or 0,
+        fouls_committed=agg["fc"] or 0,
+        fouls_won=agg["fw"] or 0,
+        attendance_total=att_total,
+        attendance_avg=(round(att_total / att_match_count) if att_match_count else None),
+        capacity_total=cap_total,
+        capacity_avg=(round(cap_total / fill_matches) if fill_matches else None),
+        fill_percent=(round(att_total / cap_total * 100) if cap_total else None),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +652,43 @@ async def get_match(match_id: int):
                 penalty_saves=sr["penalty_saves"],
             ))
 
-    return MatchDetail(match=match, lineups=lineups, events=events, stats=stats)
+        # ---- Per-team aggregate stats ---------------------------------
+        # Summed from player_match_stats for everything except goals; goals
+        # come from match events so own goals credit the correct (opposing)
+        # team — never the player's stats row.
+        team_stats: list[TeamMatchStats] = []
+        for side_id in (row.get("home_id"), row.get("away_id")):
+            if side_id is None:
+                continue
+            side_stats = [s for s in stat_rows if s["team_id"] == side_id]
+            pa  = sum(s["passes_attempted"] or 0 for s in side_stats)
+            pc  = sum(s["passes_completed"] or 0 for s in side_stats)
+            # Goals via events: own goals credit the opposite team
+            other_id = row["away_id"] if side_id == row.get("home_id") else row["home_id"]
+            goals = sum(
+                1 for e in event_rows
+                if e["event_type"] == "goal"
+                and (
+                    (e["team_id"] == side_id and not e["is_own_goal"])
+                    or (e["team_id"] == other_id and e["is_own_goal"])
+                )
+            )
+            team_stats.append(TeamMatchStats(
+                team_id=side_id,
+                goals=goals,
+                yellow_cards=sum(s["yellow_cards"] or 0 for s in side_stats),
+                red_cards=sum(s["red_cards"] or 0 for s in side_stats),
+                passes_attempted=pa,
+                passes_completed=pc,
+                pass_accuracy=(round(pc / pa * 100) if pa > 0 else None),
+                shots_total=sum(s["shots_total"] or 0 for s in side_stats),
+                shots_on_target=sum(s["shots_on_target"] or 0 for s in side_stats),
+                fouls_committed=sum((s["fouls_committed"] or 0) for s in side_stats),
+                fouls_won=sum((s["fouls_won"] or 0) for s in side_stats),
+            ))
+
+    return MatchDetail(match=match, lineups=lineups, events=events,
+                       stats=stats, team_stats=team_stats)
 
 
 # ---------------------------------------------------------------------------
@@ -698,6 +816,69 @@ async def get_leaderboard():
             ORDER BY minutes_played DESC, p.name
         """)
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Team leaderboard — one row per team aggregated across played matches
+# ---------------------------------------------------------------------------
+
+@app.get("/api/team-leaderboard", response_model=list[TeamLeaderboardRow])
+async def get_team_leaderboard():
+    async with get_db() as db:
+        teams = await db.fetchall(
+            "SELECT id, name, code, flag_url FROM teams ORDER BY name"
+        )
+        out: list[TeamLeaderboardRow] = []
+        for t in teams:
+            totals = await _build_team_totals(db, t["id"])
+            if totals is None or totals.matches_played == 0:
+                continue
+            out.append(TeamLeaderboardRow(
+                team_id=t["id"], team_name=t["name"], team_code=t["code"],
+                flag_url=t.get("flag_url"),
+                matches_played=totals.matches_played,
+                goals_for=totals.goals_for,
+                goals_against=totals.goals_against,
+                yellow_cards=totals.yellow_cards,
+                red_cards=totals.red_cards,
+                passes_attempted=totals.passes_attempted,
+                passes_completed=totals.passes_completed,
+                pass_accuracy=totals.pass_accuracy,
+                shots_total=totals.shots_total,
+                shots_on_target=totals.shots_on_target,
+                fouls_committed=totals.fouls_committed,
+                fouls_won=totals.fouls_won,
+                attendance_total=totals.attendance_total,
+                attendance_avg=totals.attendance_avg,
+                capacity_total=totals.capacity_total,
+                fill_percent=totals.fill_percent,
+            ))
+    return out
+
+
+@app.get("/api/attendance-summary", response_model=AttendanceSummary)
+async def get_attendance_summary():
+    """Tournament-wide headline numbers for the /leaderboard hero strip."""
+    async with get_db() as db:
+        row = await db.fetchone("""
+            SELECT
+              COUNT(*)                              AS matches_with_attendance,
+              COALESCE(SUM(m.attendance), 0)        AS attendance_total,
+              COALESCE(SUM(v.capacity), 0)          AS capacity_total
+            FROM matches m
+            LEFT JOIN venues v ON m.venue_id = v.id
+            WHERE m.attendance IS NOT NULL
+        """)
+    n   = row["matches_with_attendance"] or 0
+    att = row["attendance_total"] or 0
+    cap = row["capacity_total"] or 0
+    return AttendanceSummary(
+        matches_with_attendance=n,
+        attendance_total=att,
+        attendance_avg=(round(att / n) if n else None),
+        capacity_total=cap,
+        fill_percent=(round(att / cap * 100) if cap else None),
+    )
 
 
 # ---------------------------------------------------------------------------

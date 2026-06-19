@@ -90,6 +90,8 @@ export interface AdminMatchRow {
   away_name: string | null
   away_code: string | null
   away_flag: string | null
+  attendance: number | null
+  venue_capacity: number | null
 }
 
 export interface AdminTeam {

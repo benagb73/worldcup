@@ -208,6 +208,7 @@ function ScorePanel({ match, onSave, busy }: {
     et_home: match.et_home, et_away: match.et_away,
     pen_home: match.pen_home, pen_away: match.pen_away,
   })
+  const [attendance, setAttendance] = useState<number | null>(match.attendance)
 
   useEffect(() => {
     setStatus(match.status)
@@ -217,6 +218,7 @@ function ScorePanel({ match, onSave, busy }: {
       et_home: match.et_home, et_away: match.et_away,
       pen_home: match.pen_home, pen_away: match.pen_away,
     })
+    setAttendance(match.attendance)
   }, [match])
 
   const set = (k: keyof typeof scores, v: number | null) =>
@@ -229,8 +231,14 @@ function ScorePanel({ match, onSave, busy }: {
   }
 
   function save() {
-    onSave({ status, ...scores } as any)
+    // Backend treats attendance=0 as "clear back to NULL"; we send 0 when the
+    // input is blank so the admin can wipe a wrong value.
+    onSave({ status, ...scores, attendance: attendance ?? 0 } as any)
   }
+
+  const fillPct = (attendance != null && match.venue_capacity)
+    ? Math.round((attendance / match.venue_capacity) * 100)
+    : null
 
   return (
     <section className="rounded-2xl border border-white/10 panel p-6">
@@ -257,24 +265,51 @@ function ScorePanel({ match, onSave, busy }: {
           <ScoreRow label="Penalty shootout" homeKey="pen_home" awayKey="pen_away" scores={scores} set={set} bump={bump} />
         </div>
 
-        {/* Status selector */}
-        <div>
-          <label className="text-[10px] font-bold tracking-widest text-cream/40">STATUS</label>
-          <div className="mt-2 space-y-2">
-            {STATUS_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setStatus(opt.value)}
-                className={clsx(
-                  'w-full rounded-lg border px-3 py-2 text-left text-sm font-semibold transition-colors',
-                  status === opt.value
-                    ? 'border-amber-400/50 bg-amber-500/10 text-amber-400'
-                    : 'border-white/10 bg-white/[0.02] text-cream/60 hover:border-white/20 hover:text-cream'
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
+        {/* Status selector + attendance */}
+        <div className="space-y-4">
+          <div>
+            <label className="text-[10px] font-bold tracking-widest text-cream/40">STATUS</label>
+            <div className="mt-2 space-y-2">
+              {STATUS_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setStatus(opt.value)}
+                  className={clsx(
+                    'w-full rounded-lg border px-3 py-2 text-left text-sm font-semibold transition-colors',
+                    status === opt.value
+                      ? 'border-amber-400/50 bg-amber-500/10 text-amber-400'
+                      : 'border-white/10 bg-white/[0.02] text-cream/60 hover:border-white/20 hover:text-cream'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+            <label className="text-[10px] font-bold tracking-widest text-cream/40 block">
+              ATTENDANCE
+              {match.venue_capacity != null && (
+                <span className="ml-2 font-normal text-cream/30 normal-case tracking-normal">
+                  capacity {match.venue_capacity.toLocaleString()}
+                </span>
+              )}
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={attendance ?? ''}
+              onChange={e => setAttendance(e.target.value === '' ? null : Math.max(0, Number(e.target.value)))}
+              onFocus={e => e.target.select()}
+              placeholder="not yet known"
+              className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-right font-mono text-base tabular-nums text-cream placeholder:text-cream/30 focus:border-amber-400/50 focus:outline-none"
+            />
+            {fillPct != null && (
+              <div className="mt-1.5 text-right text-[10px] font-bold tracking-widest text-amber-400">
+                {fillPct}% FULL
+              </div>
+            )}
           </div>
         </div>
       </div>
