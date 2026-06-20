@@ -68,7 +68,7 @@ export default function LeaderboardPage() {
   const sortDef = useMemo(() => COLUMNS.find(c => c.key === sortKey)!, [sortKey])
 
   const sorted: LeaderboardRow[] = useMemo(() => {
-    if (!data) return []
+    if (!Array.isArray(data)) return []
     const filtered = posFilter === 'ALL'
       ? data
       : data.filter((r: LeaderboardRow) => r.position === posFilter)
@@ -287,7 +287,9 @@ function TeamLeaderboardTable() {
   const sortDef = useMemo(() => TEAM_COLS.find(c => c.key === sortKey)!, [sortKey])
 
   const sorted: TeamLeaderboardRow[] = useMemo(() => {
-    if (!data) return []
+    // Defensive: if the backend hasn't been deployed with the new endpoint
+    // yet, useSWR gets back {detail: "Not Found"} and spreading would throw.
+    if (!Array.isArray(data)) return []
     const arr = [...data]
     arr.sort((a, b) => {
       const va = sortDef.value(a)
