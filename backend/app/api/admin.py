@@ -502,17 +502,29 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
     def evmin(pid: int, etype: str) -> Optional[int]:
         return next((e["minute"] for e in events if e["player_id"] == pid and e["event_type"] == etype), None)
 
+    def exit_minute(pid: int) -> Optional[int]:
+        """Earliest minute the player left the pitch — whichever comes first:
+        substituted off OR sent off (straight red or second yellow). Returns
+        None if the player finished the match on the pitch."""
+        candidates = [
+            evmin(pid, "substitution_off"),
+            evmin(pid, "red_card"),
+            evmin(pid, "yellow_red_card"),
+        ]
+        actual = [m for m in candidates if m is not None]
+        return min(actual) if actual else None
+
     for lp in lineup:
         pid       = lp["player_id"]
         is_start  = bool(lp["is_starter"])
-        sub_off   = evmin(pid, "substitution_off")
+        exit_min  = exit_minute(pid)
         sub_on    = evmin(pid, "substitution_on")
 
         # Minutes played heuristic — user can override later via stats form
         if is_start:
-            mins = sub_off if sub_off is not None else 90
+            mins = exit_min if exit_min is not None else 90
         elif sub_on is not None:
-            mins = max(0, 90 - sub_on)
+            mins = max(0, (exit_min if exit_min is not None else 90) - sub_on)
         else:
             mins = 0  # named in squad but didn't come on
 
