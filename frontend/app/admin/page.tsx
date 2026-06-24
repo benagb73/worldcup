@@ -93,7 +93,7 @@ function LoginGate({ onSuccess }: { onSuccess: () => void }) {
 function MatchPicker({ onSignOut }: { onSignOut: () => void }) {
   const [matches, setMatches] = useState<AdminMatchRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'live' | 'today' | 'scheduled' | 'final'>('all')
+  const [tab, setTab] = useState<'toplay' | 'final'>('toplay')
 
   useEffect(() => {
     adminFetch<AdminMatchRow[]>('/matches')
@@ -107,23 +107,20 @@ function MatchPicker({ onSignOut }: { onSignOut: () => void }) {
   if (error)  return <div className="text-center py-20 text-live">{error}</div>
   if (!matches) return <div className="py-20"><div className="h-20 shimmer rounded-xl" /></div>
 
-  const today = new Date().toISOString().slice(0, 10)
-  const filtered = matches.filter(m => {
-    if (filter === 'all') return true
-    if (filter === 'live') return m.status.startsWith('live')
-    if (filter === 'today') return m.scheduled_at.startsWith(today)
-    if (filter === 'scheduled') return m.status === 'scheduled'
-    if (filter === 'final') return m.status === 'final'
-    return true
-  })
+  // Split into two buckets. TO PLAY = live + scheduled + postponed,
+  // sorted live-first then by kickoff ascending (next match on top).
+  // FINAL = status='final', sorted by kickoff descending (most recent first).
+  const finals  = matches.filter(m => m.status === 'final')
+                         .sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at))
+  const toPlay  = matches.filter(m => m.status !== 'final')
+                         .sort((a, b) => {
+                           const aLive = a.status.startsWith('live') ? 0 : 1
+                           const bLive = b.status.startsWith('live') ? 0 : 1
+                           if (aLive !== bLive) return aLive - bLive
+                           return a.scheduled_at.localeCompare(b.scheduled_at)
+                         })
 
-  const counts = {
-    all: matches.length,
-    live: matches.filter(m => m.status.startsWith('live')).length,
-    today: matches.filter(m => m.scheduled_at.startsWith(today)).length,
-    scheduled: matches.filter(m => m.status === 'scheduled').length,
-    final: matches.filter(m => m.status === 'final').length,
-  }
+  const list = tab === 'toplay' ? toPlay : finals
 
   return (
     <div className="space-y-6">
@@ -146,34 +143,44 @@ function MatchPicker({ onSignOut }: { onSignOut: () => void }) {
         </button>
       </div>
 
-      {/* Filter pills */}
-      <div className="flex flex-wrap gap-2">
-        {(['all', 'live', 'today', 'scheduled', 'final'] as const).map(k => (
-          <button
-            key={k}
-            onClick={() => setFilter(k)}
-            className={clsx(
-              'rounded-full border px-3 py-1.5 text-[11px] font-bold tracking-widest transition-colors',
-              filter === k
-                ? 'border-amber-400/50 bg-amber-500/10 text-amber-400'
-                : 'border-white/10 text-cream/50 hover:text-cream hover:border-white/20'
-            )}
-          >
-            {k.toUpperCase()} · {counts[k]}
-          </button>
-        ))}
+      {/* Tabs: TO PLAY first so live + upcoming sit at the top of the page */}
+      <div className="rounded-full border border-white/10 bg-white/[0.02] p-1 flex items-center gap-1">
+        <PickerTabButton active={tab === 'toplay'} onClick={() => setTab('toplay')}>
+          TO PLAY · {toPlay.length}
+        </PickerTabButton>
+        <PickerTabButton active={tab === 'final'}  onClick={() => setTab('final')}>
+          FINAL · {finals.length}
+        </PickerTabButton>
       </div>
 
-      {filtered.length === 0 ? (
+      {list.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-white/10 panel py-12 text-center text-sm text-cream/40">
-          No matches in this filter.
+          {tab === 'toplay' ? 'No matches left to play.' : 'No matches have finished yet.'}
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map(m => <MatchPickerRow key={m.id} match={m} />)}
+          {list.map(m => <MatchPickerRow key={m.id} match={m} />)}
         </div>
       )}
     </div>
+  )
+}
+
+function PickerTabButton({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'flex-1 rounded-full px-4 py-2 text-[11px] font-bold tracking-widest transition-colors',
+        active
+          ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-400/30'
+          : 'text-cream/50 hover:text-cream hover:bg-white/5'
+      )}
+    >
+      {children}
+    </button>
   )
 }
 
