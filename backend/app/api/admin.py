@@ -234,6 +234,9 @@ async def update_match(match_id: int, body: MatchUpdate):
         # Recompute group standings if the match has a group and is final
         if body.auto_recalc_standings and merged["status"] == "final" and match["group_name"]:
             await _recompute_group_standings(db, match["group_name"])
+            # When all of this group's matches are final, push the winner +
+            # runner-up into any bracket slots that reference them.
+            await _maybe_fill_bracket_from_group(db, match["group_name"])
 
         # Score any family-competition picks attached to this match
         from app.api.compete import recompute_match_points
@@ -307,6 +310,105 @@ async def _recompute_group_standings(db, group: str) -> None:
               goals_against = excluded.goals_against
         """, [group, tid, stats["played"], stats["won"], stats["drawn"],
               stats["lost"], stats["gf"], stats["ga"]])
+
+
+# ---------------------------------------------------------------------------
+# Bracket auto-fill
+# ---------------------------------------------------------------------------
+
+import re as _re   # local import to avoid polluting module namespace
+
+# Matches "Winner Group A" / "Winner A" / "Winners A"
+_GROUP_WINNER_RE   = _re.compile(r"^\s*winners?(?:\s+group)?\s+([A-Z])\s*$", _re.I)
+# Matches "Runner-up Group B" / "Runner up B" / "Runners-up B" / "2nd Group B"
+_GROUP_RUNNERUP_RE = _re.compile(
+    r"^\s*(?:runners?[-\s]?up|2nd|second)(?:\s+place)?(?:\s+group)?\s+([A-Z])\s*$",
+    _re.I,
+)
+
+
+def _parse_group_seed(desc: Optional[str]) -> Optional[tuple[str, int]]:
+    """Return (group_letter, 1) for a winner descriptor, (group_letter, 2)
+    for a runner-up descriptor, or None if it doesn't match either pattern
+    (e.g. 'Best 3rd' / 'Winner SF1' / NULL)."""
+    if not desc:
+        return None
+    m = _GROUP_WINNER_RE.match(desc)
+    if m:
+        return (m.group(1).upper(), 1)
+    m = _GROUP_RUNNERUP_RE.match(desc)
+    if m:
+        return (m.group(1).upper(), 2)
+    return None
+
+
+async def _maybe_fill_bracket_from_group(db, group: str) -> None:
+    """When every match in this group is final, look up winner + runner-up
+    from the freshly-recomputed group_standings, then patch any bracket
+    slots whose seed_desc references this group's 1st or 2nd place.
+
+    Third-place qualification isn't resolved here — it depends on all
+    groups being complete, so a separate sweep handles that.
+    """
+    # Bail out if the group still has unfinished matches
+    pending = await db.fetchone(
+        "SELECT COUNT(*) AS n FROM matches "
+        "WHERE group_name = ? AND status != 'final'",
+        [group],
+    )
+    if pending and pending["n"] > 0:
+        return
+
+    # Pull the same ordering used everywhere else (points, GD, GF)
+    standings = await db.fetchall("""
+        SELECT team_id, points, goal_diff, goals_for
+        FROM group_standings
+        WHERE group_name = ?
+        ORDER BY points DESC, goal_diff DESC, goals_for DESC, team_id
+    """, [group])
+    if len(standings) < 2:
+        return  # safety: malformed group
+
+    winner_id    = standings[0]["team_id"]
+    runner_up_id = standings[1]["team_id"]
+    pos_to_team  = {1: winner_id, 2: runner_up_id}
+
+    # Find any bracket slot that references this group's 1st or 2nd
+    slots = await db.fetchall(
+        "SELECT id, match_id, home_team_id, away_team_id, "
+        "home_seed_desc, away_seed_desc FROM bracket"
+    )
+    for s in slots:
+        new_home = s["home_team_id"]
+        new_away = s["away_team_id"]
+        for side in ("home", "away"):
+            parsed = _parse_group_seed(s[f"{side}_seed_desc"])
+            if parsed is None:
+                continue
+            grp, pos = parsed
+            if grp != group:
+                continue
+            tid = pos_to_team[pos]
+            if side == "home":
+                new_home = tid
+            else:
+                new_away = tid
+
+        if new_home == s["home_team_id"] and new_away == s["away_team_id"]:
+            continue   # nothing changed
+
+        await db.execute(
+            "UPDATE bracket SET home_team_id = ?, away_team_id = ? WHERE id = ?",
+            [new_home, new_away, s["id"]],
+        )
+        # Mirror the same team change onto the linked R32 match row so the
+        # admin's match editor and the public match page both pick it up.
+        if s["match_id"] is not None:
+            await db.execute(
+                "UPDATE matches SET home_team_id = ?, away_team_id = ?, "
+                "updated_at = datetime('now') WHERE id = ?",
+                [new_home, new_away, s["match_id"]],
+            )
 
 
 # ---------------------------------------------------------------------------
