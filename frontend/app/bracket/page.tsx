@@ -109,8 +109,8 @@ function BracketCard({ slot, stage }: { slot: BracketSlot; stage: string }) {
 
       {/* Teams */}
       <div className="space-y-2">
-        <BracketRow team={slot.home_team} seed={slot.home_seed_desc} score={home} isWinner={m?.winner_id === slot.home_team?.id} isLive={isLive ?? false} />
-        <BracketRow team={slot.away_team} seed={slot.away_seed_desc} score={away} isWinner={m?.winner_id === slot.away_team?.id} isLive={isLive ?? false} />
+        <BracketRow team={slot.home_team} provisional={slot.home_team_provisional} seed={slot.home_seed_desc} score={home} isWinner={m?.winner_id === slot.home_team?.id} isLive={isLive ?? false} />
+        <BracketRow team={slot.away_team} provisional={slot.away_team_provisional} seed={slot.away_seed_desc} score={away} isWinner={m?.winner_id === slot.away_team?.id} isLive={isLive ?? false} />
       </div>
 
       {suffix && suffix.includes('pens') && (
@@ -129,23 +129,43 @@ function BracketCard({ slot, stage }: { slot: BracketSlot; stage: string }) {
   return inner
 }
 
-function BracketRow({ team, seed, score, isWinner, isLive }: {
-  team: Team | null; seed: string | null; score: number | null; isWinner: boolean; isLive: boolean
+function BracketRow({ team, provisional, seed, score, isWinner, isLive }: {
+  team: Team | null
+  provisional: Team | null
+  seed: string | null
+  score: number | null
+  isWinner: boolean
+  isLive: boolean
 }) {
+  // Three render modes:
+  //  1. confirmed team   — bold, full-opacity name + real flag
+  //  2. provisional team — italic, dimmed name + real flag, same TBD vibe
+  //                        so it's obvious the team hasn't actually clinched
+  //  3. nothing known    — italic seed_desc placeholder ("Winner Group F"...)
+  const showTeam = team ?? provisional
+  const isProvisional = !team && !!provisional
+
   return (
     <div className={clsx(
       'flex items-center gap-3 rounded-lg px-2.5 py-2',
       isWinner ? 'bg-amber-500/10 ring-1 ring-amber-400/30' : 'bg-white/[0.02]'
     )}>
-      {team ? (
+      {showTeam ? (
         <>
-          <Flag url={team.flag_url} code={team.code} />
+          <Flag url={showTeam.flag_url} code={showTeam.code} />
           <span className={clsx(
-            'flex-1 truncate text-sm font-bold',
-            isWinner ? 'text-cream' : 'text-cream/70'
+            'flex-1 truncate text-sm',
+            isProvisional ? 'italic font-semibold text-cream/35' :
+            isWinner ? 'font-bold text-cream' :
+            'font-bold text-cream/70'
           )}>
-            {team.name}
+            {showTeam.name}
           </span>
+          {isProvisional && (
+            <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[8px] font-bold tracking-widest text-cream/30">
+              AS&nbsp;IT&nbsp;STANDS
+            </span>
+          )}
         </>
       ) : (
         <>

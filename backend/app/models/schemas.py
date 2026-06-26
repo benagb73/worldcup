@@ -217,6 +217,12 @@ class BracketSlot(BaseModel):
     home_seed_desc: Optional[str]
     away_seed_desc: Optional[str]
     match: Optional[MatchSummary]
+    # "As it stands" projection — populated when home_team/away_team is still
+    # NULL but we can guess from current group standings (winner / runner-up
+    # of an in-progress group, or top-8 best 3rd-placed team mapped to a slot
+    # constrained to specific groups). Rendered in italics on the frontend.
+    home_team_provisional: Optional[Team] = None
+    away_team_provisional: Optional[Team] = None
 
 
 # ---------------------------------------------------------------------------

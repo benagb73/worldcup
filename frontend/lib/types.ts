@@ -387,4 +387,9 @@ export interface BracketSlot {
   home_seed_desc: string | null
   away_seed_desc: string | null
   match: MatchSummary | null
+  // "As it stands" — current standings projection for an empty slot.
+  // Rendered in italics on the bracket so it's visually distinct from
+  // teams that have actually clinched their spot.
+  home_team_provisional: Team | null
+  away_team_provisional: Team | null
 }

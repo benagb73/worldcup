@@ -901,6 +901,17 @@ async def get_bracket():
             ORDER BY b.stage, b.slot
         """)
 
+        # ---- Provisional projection: current group standings + top-8 thirds.
+        # Only computed once per request. Used to fill home_team_provisional /
+        # away_team_provisional on slots that don't yet have a real team.
+        rankings    = await _current_group_rankings(db)
+        third_qual  = _top_third_qualifiers(rankings, n=8)
+        third_slots = [r for r in rows
+                       if (_parse_third_groups(r.get("home_seed_desc")) is not None)
+                       or (_parse_third_groups(r.get("away_seed_desc")) is not None)]
+        third_assign = _assign_thirds_to_slots(third_slots, third_qual)
+        team_by_id   = await _teams_by_id(db)
+
     result = []
     for r in rows:
         match = None
@@ -912,21 +923,235 @@ async def get_bracket():
             if mrow:
                 match = await _build_match_summary(mrow)
 
+        home_team = Team(id=r["htid"], name=r["htname"], code=r["htcode"],
+                         group_name=r.get("htgroup"), flag_url=r.get("htflag"),
+                         world_rank=r.get("htrank")) if r.get("htid") else None
+        away_team = Team(id=r["atid"], name=r["atname"], code=r["atcode"],
+                         group_name=r.get("atgroup"), flag_url=r.get("atflag"),
+                         world_rank=r.get("atrank")) if r.get("atid") else None
+
+        # Provisional projections (only when the actual slot is still empty)
+        home_prov = None if home_team else _project_team(
+            r.get("home_seed_desc"), rankings, third_assign.get((r["id"], "home")),
+            team_by_id,
+        )
+        away_prov = None if away_team else _project_team(
+            r.get("away_seed_desc"), rankings, third_assign.get((r["id"], "away")),
+            team_by_id,
+        )
+
         result.append(BracketSlot(
             slot=r["slot"], stage=r["stage"],
-            home_team=Team(id=r["htid"], name=r["htname"], code=r["htcode"],
-                           group_name=r.get("htgroup"), flag_url=r.get("htflag"),
-                           world_rank=r.get("htrank"))
-            if r.get("htid") else None,
-            away_team=Team(id=r["atid"], name=r["atname"], code=r["atcode"],
-                           group_name=r.get("atgroup"), flag_url=r.get("atflag"),
-                           world_rank=r.get("atrank"))
-            if r.get("atid") else None,
+            home_team=home_team,
+            away_team=away_team,
             home_seed_desc=r.get("home_seed_desc"),
             away_seed_desc=r.get("away_seed_desc"),
             match=match,
+            home_team_provisional=home_prov,
+            away_team_provisional=away_prov,
         ))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Bracket projection helpers
+# ---------------------------------------------------------------------------
+
+import re as _re_main
+
+# "Winner Group X" / "Winner X" / "Winners X"
+_WINNER_RE     = _re_main.compile(r"^\s*winners?(?:\s+group)?\s+([A-Z])\s*$", _re_main.I)
+# "Runner up Group X" / "Runner-up X" / "Runners-up X" / "2nd X" / "2nd Group X" / "2nd place X"
+_RUNNERUP_RE   = _re_main.compile(
+    r"^\s*(?:runners?[-\s]?up|2nd|second)(?:\s+place)?(?:\s+group)?\s+([A-Z])\s*$",
+    _re_main.I,
+)
+# "3rd Group X/Y/Z" or "Best 3rd (X/Y/Z)" — return the allowed groups.
+# Requires a "3rd"/"third"/"best 3rd" marker followed by a list of single
+# letters separated by `/` or commas. We tolerate an optional "Group" /
+# "Groups" word and parens between the marker and the letters.
+_THIRD_GROUPS_RE = _re_main.compile(
+    r"(?:3rd|third|best\s+3rd)\s*(?:place\s+)?(?:groups?\s+)?\(?\s*"
+    r"([A-Z](?:\s*[/,]\s*[A-Z])+)",
+    _re_main.I,
+)
+
+
+def _parse_winner_group(desc: Optional[str]) -> Optional[str]:
+    if not desc:
+        return None
+    m = _WINNER_RE.match(desc)
+    return m.group(1).upper() if m else None
+
+
+def _parse_runnerup_group(desc: Optional[str]) -> Optional[str]:
+    if not desc:
+        return None
+    m = _RUNNERUP_RE.match(desc)
+    return m.group(1).upper() if m else None
+
+
+def _parse_third_groups(desc: Optional[str]) -> Optional[set[str]]:
+    """Return the allowed group letters for a 3rd-place slot (e.g.
+    'A/B/C/D/F' → {A,B,C,D,F}), or None if the descriptor isn't a 3rd-place
+    slot."""
+    if not desc:
+        return None
+    m = _THIRD_GROUPS_RE.search(desc)
+    if not m:
+        return None
+    return {g.strip().upper() for g in _re_main.split(r"[/,]", m.group(1)) if g.strip()}
+
+
+async def _current_group_rankings(db) -> dict[str, list[dict]]:
+    """For every group, return its standings rows ordered as they would
+    appear publicly (points DESC, GD DESC, GF DESC, team_id ASC for stable
+    tie-break)."""
+    rows = await db.fetchall("""
+        SELECT gs.group_name, gs.team_id, gs.points,
+               gs.goal_diff, gs.goals_for
+        FROM group_standings gs
+        ORDER BY gs.group_name,
+                 gs.points DESC, gs.goal_diff DESC, gs.goals_for DESC,
+                 gs.team_id
+    """)
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["group_name"], []).append(r)
+    return out
+
+
+def _top_third_qualifiers(rankings: dict[str, list[dict]], n: int) -> list[dict]:
+    """Return the top-N 3rd-placed teams across all groups, sorted by
+    points → goal_diff → goals_for. Each dict has team_id, group_name,
+    points, goal_diff, goals_for."""
+    pool: list[dict] = []
+    for group, rows in rankings.items():
+        if len(rows) >= 3:
+            third = rows[2]                          # 3rd-placed team
+            pool.append({
+                "group_name": group,
+                "team_id":    third["team_id"],
+                "points":     third["points"],
+                "goal_diff":  third["goal_diff"],
+                "goals_for":  third["goals_for"],
+            })
+    pool.sort(key=lambda r: (-r["points"], -r["goal_diff"], -r["goals_for"], r["team_id"]))
+    return pool[:n]
+
+
+def _assign_thirds_to_slots(
+    third_slots: list[dict],
+    qualifiers:  list[dict],
+) -> dict[tuple[int, str], int]:
+    """Bipartite-match the (up to 8) best 3rd-placed teams to the slots
+    constrained by their seed_desc allowed-group set. Returns a mapping of
+    (bracket_row_id, 'home' | 'away') → team_id for the slots we managed to
+    fill. Uses depth-first backtracking — with at most 8 slots and 8 teams
+    it's effectively instant.
+
+    If a unique assignment isn't possible (e.g. mid-tournament when some
+    groups haven't fielded a 3rd-placed team yet), we still return the
+    best partial assignment — slots that couldn't be filled stay empty.
+    """
+    # Enumerate every 3rd-place "side" on a slot — usually each slot has one,
+    # but in principle a bracket could be authored with two.
+    sides: list[tuple[int, str, set[str]]] = []
+    for slot in third_slots:
+        for side in ("home", "away"):
+            allowed = _parse_third_groups(slot.get(f"{side}_seed_desc"))
+            if allowed:
+                sides.append((slot["id"], side, allowed))
+
+    if not sides or not qualifiers:
+        return {}
+
+    # Order sides by constraint tightness (fewest options first) so the
+    # backtracker fails fast on the hardest slots before chewing through
+    # easy ones.
+    sides.sort(key=lambda s: (len(s[2]), s[0]))
+
+    by_group: dict[str, dict] = {q["group_name"]: q for q in qualifiers}
+    target = min(len(sides), len(qualifiers))   # best achievable size
+
+    best: dict[str, object] = {"size": -1, "assign": {}}
+    used_groups: set[str] = set()
+    assignment: dict[tuple[int, str], int] = {}
+
+    def backtrack(i: int) -> None:
+        # Already found a full max assignment? Stop exploring.
+        if best["size"] == target:
+            return
+        if i == len(sides):
+            if len(assignment) > int(best["size"]):
+                best["size"]   = len(assignment)
+                best["assign"] = dict(assignment)
+            return
+        # Branch-and-bound: even if we fill every remaining slot we can't
+        # beat the current best → prune.
+        if len(assignment) + (len(sides) - i) <= int(best["size"]):
+            return
+
+        slot_id, side, allowed = sides[i]
+        candidates = sorted(
+            (g for g in allowed if g in by_group and g not in used_groups),
+            key=lambda g: (-by_group[g]["points"],
+                           -by_group[g]["goal_diff"],
+                           -by_group[g]["goals_for"],
+                           by_group[g]["team_id"]),
+        )
+        # Try every candidate, AND try skipping. We must explore both
+        # branches at every level to find the true maximum-cardinality
+        # assignment — a greedy "first candidate wins" approach can leave
+        # a later, more-constrained slot unfillable when a different
+        # choice here would have unblocked it.
+        for grp in candidates:
+            used_groups.add(grp)
+            assignment[(slot_id, side)] = by_group[grp]["team_id"]
+            backtrack(i + 1)
+            used_groups.remove(grp)
+            del assignment[(slot_id, side)]
+            if best["size"] == target:
+                return
+        backtrack(i + 1)
+
+    backtrack(0)
+    return best["assign"]  # type: ignore[return-value]
+
+
+async def _teams_by_id(db) -> dict[int, Team]:
+    rows = await db.fetchall(
+        "SELECT id, name, code, group_name, flag_url, world_rank FROM teams"
+    )
+    return {
+        r["id"]: Team(
+            id=r["id"], name=r["name"], code=r["code"],
+            group_name=r.get("group_name"), flag_url=r.get("flag_url"),
+            world_rank=r.get("world_rank"),
+        ) for r in rows
+    }
+
+
+def _project_team(
+    seed_desc:  Optional[str],
+    rankings:   dict[str, list[dict]],
+    third_team: Optional[int],
+    team_by_id: dict[int, Team],
+) -> Optional[Team]:
+    """Best-guess team for an empty bracket slot, from current standings.
+    Returns None if we can't project anything useful."""
+    if not seed_desc:
+        return None
+    # Pre-computed 3rd-place assignment wins if present.
+    if third_team is not None:
+        return team_by_id.get(third_team)
+    grp = _parse_winner_group(seed_desc)
+    if grp and grp in rankings and rankings[grp]:
+        return team_by_id.get(rankings[grp][0]["team_id"])
+    grp = _parse_runnerup_group(seed_desc)
+    if grp and grp in rankings and len(rankings[grp]) >= 2:
+        return team_by_id.get(rankings[grp][1]["team_id"])
+    return None
 
 
 # ---------------------------------------------------------------------------
