@@ -175,11 +175,48 @@ async def refill_bracket():
         for g in complete:
             await _recompute_group_standings(db, g)
             await _maybe_fill_bracket_from_group(db, g)
+        # Catch-up mirror: copy bracket → matches for any linked row whose
+        # match doesn't yet have the same teams. Needed for the case where
+        # an earlier refill populated bracket teams BEFORE the linker had
+        # set bracket.match_id, so _maybe_fill_bracket_from_group's
+        # "nothing changed" early-exit skipped the matches UPDATE.
+        mirrored = await _mirror_bracket_to_matches(db)
     return {
         "ok": True,
         "bracket_links_added": linked,
-        "complete_groups": complete,
+        "matches_mirrored":    mirrored,
+        "complete_groups":     complete,
     }
+
+
+async def _mirror_bracket_to_matches(db) -> int:
+    """For every bracket row with match_id and at least one team set, make
+    sure the linked match row has the same teams. Returns count of matches
+    updated."""
+    rows = await db.fetchall("""
+        SELECT b.id, b.match_id, b.home_team_id AS b_home, b.away_team_id AS b_away,
+               m.home_team_id AS m_home, m.away_team_id AS m_away
+        FROM bracket b
+        JOIN matches m ON b.match_id = m.id
+        WHERE b.match_id IS NOT NULL
+          AND (b.home_team_id IS NOT NULL OR b.away_team_id IS NOT NULL)
+    """)
+    updated = 0
+    for r in rows:
+        # Only overwrite a match-side team when the bracket has a real id
+        # for it (preserve the match's existing values otherwise — e.g. for
+        # half-filled brackets where only one feeder group is complete).
+        new_home = r["b_home"] if r["b_home"] is not None else r["m_home"]
+        new_away = r["b_away"] if r["b_away"] is not None else r["m_away"]
+        if new_home == r["m_home"] and new_away == r["m_away"]:
+            continue
+        await db.execute(
+            "UPDATE matches SET home_team_id = ?, away_team_id = ?, "
+            "updated_at = datetime('now') WHERE id = ?",
+            [new_home, new_away, r["match_id"]],
+        )
+        updated += 1
+    return updated
 
 
 async def _link_bracket_to_matches(db) -> int:
