@@ -912,16 +912,26 @@ async def get_bracket():
         third_assign = _assign_thirds_to_slots(third_slots, third_qual)
         team_by_id   = await _teams_by_id(db)
 
+        # Bulk-fetch every linked match summary in ONE query instead of
+        # opening a new DB connection per row (which scales O(slots) and
+        # got noticeably slow once the bracket linker ran and all 32 R32
+        # slots gained a match_id).
+        match_ids = [r["match_id"] for r in rows if r.get("match_id")]
+        match_by_id: dict[int, dict] = {}
+        if match_ids:
+            placeholders = ",".join("?" * len(match_ids))
+            mrows = await db.fetchall(
+                f"{MATCH_SELECT} WHERE m.id IN ({placeholders})",
+                match_ids,
+            )
+            match_by_id = {mr["id"]: mr for mr in mrows}
+
     result = []
     for r in rows:
         match = None
-        if r.get("match_id"):
-            async with get_db() as db:
-                mrow = await db.fetchone(
-                    f"{MATCH_SELECT} WHERE m.id = ?", [r["match_id"]]
-                )
-            if mrow:
-                match = await _build_match_summary(mrow)
+        mrow = match_by_id.get(r["match_id"]) if r.get("match_id") else None
+        if mrow:
+            match = await _build_match_summary(mrow)
 
         home_team = Team(id=r["htid"], name=r["htname"], code=r["htcode"],
                          group_name=r.get("htgroup"), flag_url=r.get("htflag"),

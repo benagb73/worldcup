@@ -43,36 +43,117 @@ export default function BracketPage() {
       {stagesPresent.length === 0 ? (
         <EmptyBracket />
       ) : (
-        stagesPresent.map(stage => (
-          <section key={stage}>
-            <div className="mb-5 flex items-end justify-between">
-              <div>
-                <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">STAGE</div>
-                <h2 className="font-display text-3xl tracking-wide text-cream">
-                  {stageName(stage).toUpperCase()}
-                </h2>
-              </div>
-              <span className="hidden sm:block text-[10px] font-bold tracking-widest text-cream/40">
-                {byStage[stage].length} {byStage[stage].length === 1 ? 'MATCH' : 'MATCHES'}
-              </span>
-            </div>
+        <>
+          {/* DESKTOP: horizontal tournament tree. Each column uses
+              flex-col + justify-around at a shared min-height so R16 cards
+              auto-align with the midpoint between their two R32 feeders,
+              QF with its two R16s, etc. Third-place sits below, separately. */}
+          <div className="hidden lg:block">
+            <TournamentTree byStage={byStage} stagesPresent={stagesPresent} />
+          </div>
 
-            <div className={clsx(
-              'grid gap-4',
-              stage === 'final' ? 'max-w-2xl mx-auto' :
-              stage === 'third_place' ? 'max-w-2xl mx-auto' :
-              stage === 'sf' ? 'sm:grid-cols-2' :
-              stage === 'qf' ? 'sm:grid-cols-2' :
-              'sm:grid-cols-2 lg:grid-cols-3'
-            )}>
-              {byStage[stage].map(slot => (
-                <BracketCard key={slot.slot} slot={slot} stage={stage} />
-              ))}
-            </div>
-          </section>
-        ))
+          {/* MOBILE: stack stages vertically with the original card grid. */}
+          <div className="lg:hidden space-y-12">
+            {stagesPresent.map(stage => (
+              <section key={stage}>
+                <div className="mb-5 flex items-end justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">STAGE</div>
+                    <h2 className="font-display text-3xl tracking-wide text-cream">
+                      {stageName(stage).toUpperCase()}
+                    </h2>
+                  </div>
+                  <span className="hidden sm:block text-[10px] font-bold tracking-widest text-cream/40">
+                    {byStage[stage].length} {byStage[stage].length === 1 ? 'MATCH' : 'MATCHES'}
+                  </span>
+                </div>
+
+                <div className={clsx(
+                  'grid gap-4',
+                  stage === 'final' || stage === 'third_place' ? 'max-w-2xl mx-auto' :
+                  stage === 'sf' || stage === 'qf' ? 'sm:grid-cols-2' :
+                  'sm:grid-cols-2'
+                )}>
+                  {byStage[stage].map(slot => (
+                    <BracketCard key={slot.slot} slot={slot} stage={stage} />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Desktop tournament tree
+// ---------------------------------------------------------------------------
+
+const MAIN_TREE_STAGES = ['r32', 'r16', 'qf', 'sf', 'final'] as const
+// R32 baseline: 16 cards × ~110px each = comfortable column height. Other
+// columns share this so flexbox justify-around aligns each card with its
+// feeder midpoint automatically.
+const TREE_MIN_HEIGHT_PX = 1760
+
+function TournamentTree({ byStage, stagesPresent }: {
+  byStage: Record<string, BracketSlot[]>
+  stagesPresent: string[]
+}) {
+  const mainStages = MAIN_TREE_STAGES.filter(s => stagesPresent.includes(s))
+  // Sort each column by slot so feeders line up with downstream matches
+  const columns = mainStages.map(s => ({
+    stage: s,
+    slots: [...(byStage[s] ?? [])].sort((a, b) => a.slot - b.slot),
+  }))
+
+  const third = byStage['third_place'] ?? []
+
+  return (
+    <>
+      <div
+        className="flex items-stretch gap-3"
+        style={{ minHeight: TREE_MIN_HEIGHT_PX }}
+      >
+        {columns.map((col, ci) => (
+          <div key={col.stage} className="flex-1 min-w-0 flex flex-col">
+            <div className="mb-3 text-center">
+              <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">
+                STAGE
+              </div>
+              <h2 className="font-display text-lg tracking-wide text-cream">
+                {stageName(col.stage).toUpperCase()}
+              </h2>
+            </div>
+            {/* The actual tournament-tree alignment trick. flex-1 +
+                justify-around means each column's cards distribute evenly
+                over the same vertical span — so 16 → 8 → 4 → 2 → 1 cards
+                naturally line up at the right midpoints. */}
+            <div className="flex-1 flex flex-col justify-around gap-3">
+              {col.slots.map(slot => (
+                <BracketCard key={slot.slot} slot={slot} stage={col.stage} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Third-place playoff lives off to the side — not part of the main bracket. */}
+      {third.length > 0 && (
+        <div className="mt-10 max-w-md mx-auto">
+          <div className="mb-3 text-center">
+            <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">CONSOLATION</div>
+            <h2 className="font-display text-2xl tracking-wide text-cream">
+              {stageName('third_place').toUpperCase()}
+            </h2>
+          </div>
+          {third.map(slot => (
+            <BracketCard key={slot.slot} slot={slot} stage="third_place" />
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
