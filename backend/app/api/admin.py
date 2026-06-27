@@ -156,12 +156,14 @@ async def list_teams():
 
 @router.post("/bracket/refill")
 async def refill_bracket():
-    """One-shot: run _maybe_fill_bracket_from_group for every group whose
-    matches are all final. Use this once after deploying the auto-fill code
-    to catch groups that finished before the trigger existed. Idempotent
-    and safe to re-run."""
+    """One-shot maintenance: (1) link any unlinked bracket rows to their
+    matching match rows (pair by stage + slot↔match_number order), then
+    (2) run _maybe_fill_bracket_from_group for every group whose matches are
+    all final. The link step is what lets the auto-fill actually push teams
+    into the matches table so the picks form / public match page see them.
+    Idempotent and safe to re-run."""
     async with get_db() as db:
-        # Find every distinct group that has *no* unfinished matches
+        linked = await _link_bracket_to_matches(db)
         rows = await db.fetchall("""
             SELECT m.group_name
             FROM matches m
@@ -173,7 +175,53 @@ async def refill_bracket():
         for g in complete:
             await _recompute_group_standings(db, g)
             await _maybe_fill_bracket_from_group(db, g)
-    return {"ok": True, "complete_groups": complete}
+    return {
+        "ok": True,
+        "bracket_links_added": linked,
+        "complete_groups": complete,
+    }
+
+
+async def _link_bracket_to_matches(db) -> int:
+    """For every knockout stage, pair the bracket rows (ordered by slot ASC)
+    with the matches rows (ordered by match_number ASC, scheduled_at as the
+    tie-break) and write bracket.match_id where it's currently NULL.
+
+    Only fills in NULL match_id values — won't disturb any manual links the
+    admin has already set. Returns the count of rows newly linked.
+
+    FIFA's bracket numbering convention is that slot 1 of each knockout
+    round corresponds to the lowest-numbered match in that round, slot 2 to
+    the next, and so on, so pairing by stage + sort-order is correct."""
+    stages = ("r32", "r16", "qf", "sf", "third_place", "final")
+    total_linked = 0
+    for stage in stages:
+        b_rows = await db.fetchall(
+            "SELECT id FROM bracket WHERE stage = ? AND match_id IS NULL "
+            "ORDER BY slot ASC",
+            [stage],
+        )
+        if not b_rows:
+            continue
+        m_rows = await db.fetchall(
+            "SELECT id FROM matches WHERE stage = ? "
+            "ORDER BY COALESCE(match_number, 999999), scheduled_at, id",
+            [stage],
+        )
+        # Skip already-linked matches so we only pair unlinked-with-unlinked.
+        taken = await db.fetchall(
+            "SELECT match_id FROM bracket WHERE stage = ? AND match_id IS NOT NULL",
+            [stage],
+        )
+        taken_ids = {t["match_id"] for t in taken}
+        available_matches = [m for m in m_rows if m["id"] not in taken_ids]
+        for b, m in zip(b_rows, available_matches):
+            await db.execute(
+                "UPDATE bracket SET match_id = ? WHERE id = ?",
+                [m["id"], b["id"]],
+            )
+            total_linked += 1
+    return total_linked
 
 
 @router.get("/matches")
