@@ -154,6 +154,28 @@ async def list_teams():
     return rows
 
 
+@router.post("/bracket/refill")
+async def refill_bracket():
+    """One-shot: run _maybe_fill_bracket_from_group for every group whose
+    matches are all final. Use this once after deploying the auto-fill code
+    to catch groups that finished before the trigger existed. Idempotent
+    and safe to re-run."""
+    async with get_db() as db:
+        # Find every distinct group that has *no* unfinished matches
+        rows = await db.fetchall("""
+            SELECT m.group_name
+            FROM matches m
+            WHERE m.group_name IS NOT NULL
+            GROUP BY m.group_name
+            HAVING SUM(CASE WHEN m.status = 'final' THEN 0 ELSE 1 END) = 0
+        """)
+        complete = [r["group_name"] for r in rows]
+        for g in complete:
+            await _recompute_group_standings(db, g)
+            await _maybe_fill_bracket_from_group(db, g)
+    return {"ok": True, "complete_groups": complete}
+
+
 @router.get("/matches")
 async def list_matches_for_admin():
     """Compact list used in the admin match picker."""

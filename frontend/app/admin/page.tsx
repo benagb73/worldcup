@@ -129,18 +129,21 @@ function MatchPicker({ onSignOut }: { onSignOut: () => void }) {
           <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">ADMIN CONSOLE</div>
           <h1 className="font-display text-3xl tracking-wide text-cream">MATCH UPDATES</h1>
         </div>
-        <Link
-          href="/admin/scoring"
-          className="hidden sm:block rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold tracking-widest text-amber-400 hover:bg-amber-500/20"
-        >
-          SCORING CONFIG →
-        </Link>
-        <button
-          onClick={onSignOut}
-          className="text-xs font-semibold text-cream/40 hover:text-live transition-colors"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <RefillBracketButton />
+          <Link
+            href="/admin/scoring"
+            className="hidden sm:block rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold tracking-widest text-amber-400 hover:bg-amber-500/20"
+          >
+            SCORING CONFIG →
+          </Link>
+          <button
+            onClick={onSignOut}
+            className="text-xs font-semibold text-cream/40 hover:text-live transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       {/* Tabs: TO PLAY first so live + upcoming sit at the top of the page */}
@@ -160,6 +163,46 @@ function MatchPicker({ onSignOut }: { onSignOut: () => void }) {
       ) : (
         <div className="space-y-2">
           {list.map(m => <MatchPickerRow key={m.id} match={m} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RefillBracketButton() {
+  const [busy, setBusy] = useState(false)
+  const [msg,  setMsg]  = useState<string | null>(null)
+
+  async function go() {
+    if (busy) return
+    setBusy(true); setMsg(null)
+    try {
+      const res = await adminFetch<{ ok: boolean; complete_groups: string[] }>(
+        '/bracket/refill', { method: 'POST' }
+      )
+      const n = res.complete_groups.length
+      setMsg(n ? `Filled ${n} group${n === 1 ? '' : 's'}: ${res.complete_groups.join(', ')}` : 'No complete groups yet')
+      setTimeout(() => setMsg(null), 4000)
+    } catch (e) {
+      setMsg(`Error: ${e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={go}
+        disabled={busy}
+        title="Push group winners + runners-up into R32 match rows so picks work for already-complete groups."
+        className="hidden sm:block rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold tracking-widest text-amber-400 hover:bg-amber-500/20 disabled:opacity-50"
+      >
+        {busy ? 'REFILLING…' : 'REFILL BRACKET'}
+      </button>
+      {msg && (
+        <div className="absolute top-full right-0 mt-2 whitespace-nowrap rounded-lg border border-amber-400/30 bg-ink/95 px-3 py-1.5 text-[11px] font-semibold text-amber-400 shadow-gold z-10">
+          {msg}
         </div>
       )}
     </div>
