@@ -172,9 +172,18 @@ async def refill_bracket():
             HAVING SUM(CASE WHEN m.status = 'final' THEN 0 ELSE 1 END) = 0
         """)
         complete = [r["group_name"] for r in rows]
+        thirds_filled = 0
         for g in complete:
             await _recompute_group_standings(db, g)
+            # _maybe_fill_bracket_from_group also calls the thirds helper
+            # at its end, so accumulate any returned count for the final
+            # response. The bool below catches the case where the per-group
+            # loop runs but no group's completion was the final missing one.
             await _maybe_fill_bracket_from_group(db, g)
+        # Extra safety net: re-run the thirds check after all per-group
+        # fills, in case the per-group helper is later split out. No-op
+        # when the inner loop already wrote them.
+        thirds_filled = await _maybe_fill_thirds_from_complete_groups(db)
         # Catch-up mirror: copy bracket → matches for any linked row whose
         # match doesn't yet have the same teams. Needed for the case where
         # an earlier refill populated bracket teams BEFORE the linker had
@@ -185,8 +194,76 @@ async def refill_bracket():
         "ok": True,
         "bracket_links_added": linked,
         "matches_mirrored":    mirrored,
+        "thirds_filled":       thirds_filled,
         "complete_groups":     complete,
     }
+
+
+async def _maybe_fill_thirds_from_complete_groups(db) -> int:
+    """Once every group's matches are final, lock in the top-8 third-placed
+    teams to their constrained bracket slots. Uses the same projection
+    helpers as /api/bracket so the assignment matches what's been showing as
+    'as it stands' all along. No-op while any group has unfinished matches
+    or when the bipartite matcher can't fill all 8 slots (extreme edge case
+    if the bracket constraints are mis-authored).
+
+    Returns the count of bracket sides newly populated (across home + away).
+    Also mirrors each change onto the linked match row so the picks form
+    and public match page pick up the team."""
+    # Lazy import: main.py imports admin's router at module top, so a
+    # top-level import here would deadlock. Function-scope is safe.
+    from app.main import (
+        _current_group_rankings, _top_third_qualifiers,
+        _assign_thirds_to_slots, _parse_third_groups,
+    )
+
+    pending = await db.fetchone(
+        "SELECT COUNT(*) AS n FROM matches "
+        "WHERE group_name IS NOT NULL AND status != 'final'"
+    )
+    if pending and pending["n"] > 0:
+        return 0
+
+    rankings   = await _current_group_rankings(db)
+    qualifiers = _top_third_qualifiers(rankings, n=8)
+    if len(qualifiers) < 8:
+        return 0   # safety: not enough 3rd-placed teams to determine all 8
+
+    bracket_rows = await db.fetchall(
+        "SELECT id, match_id, home_team_id, away_team_id, "
+        "home_seed_desc, away_seed_desc FROM bracket"
+    )
+    third_slots = [r for r in bracket_rows
+                   if _parse_third_groups(r.get("home_seed_desc")) is not None
+                   or _parse_third_groups(r.get("away_seed_desc")) is not None]
+    assignment = _assign_thirds_to_slots(third_slots, qualifiers)
+
+    # Only commit when the matcher finds the full 8-way assignment. A partial
+    # result would mean the constraints aren't satisfiable and a manual look
+    # is warranted; we'd rather keep showing italic projections than freeze
+    # an inconsistent state.
+    if len(assignment) < 8:
+        return 0
+
+    rows_by_id = {r["id"]: r for r in bracket_rows}
+    written = 0
+    for (slot_id, side), team_id in assignment.items():
+        r = rows_by_id[slot_id]
+        col = "home_team_id" if side == "home" else "away_team_id"
+        if r[col] == team_id:
+            continue   # already locked in
+        await db.execute(
+            f"UPDATE bracket SET {col} = ? WHERE id = ?",
+            [team_id, slot_id],
+        )
+        if r["match_id"] is not None:
+            await db.execute(
+                f"UPDATE matches SET {col} = ?, updated_at = datetime('now') "
+                f"WHERE id = ?",
+                [team_id, r["match_id"]],
+            )
+        written += 1
+    return written
 
 
 async def _mirror_bracket_to_matches(db) -> int:
@@ -516,6 +593,10 @@ async def _maybe_fill_bracket_from_group(db, group: str) -> None:
                 "updated_at = datetime('now') WHERE id = ?",
                 [new_home, new_away, s["match_id"]],
             )
+
+    # If THIS group's completion was the last one missing, the top-8 thirds
+    # are now fully determined too — lock those in.
+    await _maybe_fill_thirds_from_complete_groups(db)
 
 
 # ---------------------------------------------------------------------------
