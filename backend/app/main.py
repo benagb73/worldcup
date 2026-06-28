@@ -211,17 +211,34 @@ async def get_groups():
             JOIN teams t ON gs.team_id = t.id
             ORDER BY gs.group_name, gs.points DESC, gs.goal_diff DESC, gs.goals_for DESC
         """)
+        # Source of truth for "did this team qualify to KO": the r32 bracket
+        # itself. Covers admin manual corrections to 3rd-place qualifiers.
+        ko_rows = await db.fetchall("""
+            SELECT home_team_id, away_team_id FROM bracket WHERE stage = 'r32'
+        """)
+
+    qualified_ids: set[int] = set()
+    for r in ko_rows:
+        if r.get("home_team_id"): qualified_ids.add(r["home_team_id"])
+        if r.get("away_team_id"): qualified_ids.add(r["away_team_id"])
 
     groups: dict[str, list] = {}
     for row in rows:
         g = row["group_name"]
-        groups.setdefault(g, []).append(
+        # Position within the group based on insertion order (already sorted
+        # by the SELECT). Top 2 always qualify; 3rd qualifies iff their team
+        # is in the r32 bracket.
+        existing = groups.setdefault(g, [])
+        rank = len(existing) + 1
+        is_qualified = rank <= 2 or row["team_id"] in qualified_ids
+        existing.append(
             StandingRow(
                 team=_team(row),
                 played=row["played"], won=row["won"], drawn=row["drawn"],
                 lost=row["lost"], goals_for=row["goals_for"],
                 goals_against=row["goals_against"], goal_diff=row["goal_diff"],
                 points=row["points"],
+                qualified_to_ko=is_qualified,
             )
         )
 

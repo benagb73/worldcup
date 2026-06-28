@@ -69,6 +69,10 @@ class StandingRow(BaseModel):
     goals_against: int
     goal_diff: int
     points: int
+    # True for any team that has advanced to (or projects to) the knockout
+    # round. Top 2 of each group always qualify; rank 3 qualifies iff their
+    # team_id appears in any r32 bracket slot. Computed in get_groups().
+    qualified_to_ko: bool = False
 
 
 class GroupStandings(BaseModel):

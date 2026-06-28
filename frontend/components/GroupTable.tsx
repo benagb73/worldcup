@@ -46,7 +46,11 @@ export function GroupTable({ group }: { group: GroupStandings }) {
       <div className="border-t border-white/5 bg-black/20 px-4 py-2.5 flex items-center gap-4 text-[10px] text-cream/40">
         <span className="flex items-center gap-1.5">
           <span className="h-1.5 w-3 rounded-sm bg-gold" />
-          <span>Advance to KO</span>
+          <span>Top 2 → KO</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-1.5 w-3 rounded-sm bg-emerald-400" />
+          <span>3rd → KO</span>
         </span>
       </div>
     </div>
@@ -54,7 +58,12 @@ export function GroupTable({ group }: { group: GroupStandings }) {
 }
 
 function StandingRowItem({ row, rank }: { row: StandingRow; rank: number }) {
-  const qualifies = rank <= 2
+  // Top 2 always go through. Rank 3 goes through if their team is in the
+  // r32 bracket (which the backend computes from the actual bracket rows,
+  // so manual admin corrections are honoured).
+  const isThird          = rank === 3
+  const qualifiesViaThird = isThird && row.qualified_to_ko
+  const qualifies         = rank <= 2 || qualifiesViaThird
 
   return (
     <Link
@@ -65,17 +74,20 @@ function StandingRowItem({ row, rank }: { row: StandingRow; rank: number }) {
         qualifies ? '' : 'opacity-75'
       )}
     >
-      {/* Left qualification stripe */}
+      {/* Left qualification stripe — gold for top 2, emerald for the 8 best 3rds */}
       <span className={clsx(
         'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r',
-        qualifies ? 'bg-gold' : 'bg-transparent'
+        rank <= 2          ? 'bg-gold' :
+        qualifiesViaThird  ? 'bg-emerald-400' :
+        'bg-transparent'
       )} />
 
       {/* Rank */}
       <span className={clsx(
         'flex h-5 w-5 items-center justify-center rounded text-[11px] font-bold tabular-nums',
-        rank === 1 ? 'bg-gold text-ink' :
-        rank === 2 ? 'bg-amber-500/30 text-amber-400' :
+        rank === 1                ? 'bg-gold text-ink' :
+        rank === 2                ? 'bg-amber-500/30 text-amber-400' :
+        qualifiesViaThird         ? 'bg-emerald-500/30 text-emerald-400' :
         'text-cream/40'
       )}>
         {rank}

@@ -292,8 +292,9 @@ function EmptyBracket() {
       <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/10 text-3xl">🏆</div>
       <h2 className="mt-4 font-display text-2xl tracking-wide text-cream">Bracket Coming Soon</h2>
       <p className="mt-2 max-w-md mx-auto text-sm text-cream/50">
-        The knockout bracket fills in once the group stage concludes and the top two from each
-        group advance. Check back as the tournament progresses.
+        The knockout bracket fills in once the group stage concludes — the top two from
+        each group plus the eight best third-placed teams advance. Check back as the
+        tournament progresses.
       </p>
       <Link
         href="/"

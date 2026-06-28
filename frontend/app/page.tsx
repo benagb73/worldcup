@@ -85,7 +85,7 @@ export default function HomePage() {
         <SectionHeading
           eyebrow="GROUP STAGE"
           title="Standings & Fixtures"
-          subtitle="Top two from each group advance to the knockout round"
+          subtitle="Top two from each group plus the eight best third-placed teams advance to the knockout round"
         />
 
         <div className="grid gap-8 xl:grid-cols-2">

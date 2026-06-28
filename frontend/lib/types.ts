@@ -145,6 +145,9 @@ export interface StandingRow {
   goals_against: number
   goal_diff: number
   points: number
+  // True iff this team has a slot in the R32 bracket. Top 2 of each group
+  // always qualify; rank 3 qualifies as one of the 8 best 3rd-placed teams.
+  qualified_to_ko: boolean
 }
 
 export interface GroupStandings {
