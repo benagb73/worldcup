@@ -161,9 +161,14 @@ async def refill_bracket():
     (2) run _maybe_fill_bracket_from_group for every group whose matches are
     all final. The link step is what lets the auto-fill actually push teams
     into the matches table so the picks form / public match page see them.
-    Idempotent and safe to re-run."""
+    Idempotent and safe to re-run.
+
+    NOTE: only auto-links R32 (where FIFA's bracket-slot → match-number
+    convention is reliable). For r16/qf/sf/3rd/final the slot→match mapping
+    has to be set explicitly via /admin/bracket — auto-pairing those gets
+    the wrong winners into the wrong games."""
     async with get_db() as db:
-        linked = await _link_bracket_to_matches(db)
+        linked = await _link_bracket_to_matches(db, stages=("r32",))
         rows = await db.fetchall("""
             SELECT m.group_name
             FROM matches m
@@ -219,6 +224,127 @@ async def refill_bracket():
         "ko_propagated":       ko_propagated,
         "complete_groups":     complete,
     }
+
+
+# ---------------------------------------------------------------------------
+# Bracket mapping admin endpoints
+#
+# The bracket rows know which seed_desc feeds them (e.g. "Winner Match 73 vs
+# Winner Match 75") but NOT which scheduled match row in `matches` they
+# correspond to. For R32 we auto-pair by match_number, but R16/QF/SF/Final
+# need explicit admin mapping because FIFA's bracket-slot ordering doesn't
+# align with chronological match numbering. These endpoints power the
+# /admin/bracket mapping page.
+# ---------------------------------------------------------------------------
+
+@router.get("/bracket-mapping")
+async def get_bracket_mapping():
+    """Return every bracket row + every knockout match so the admin page
+    can render dropdowns."""
+    async with get_db() as db:
+        slots = await db.fetchall("""
+            SELECT b.id, b.stage, b.slot,
+                   b.home_seed_desc, b.away_seed_desc,
+                   b.match_id,
+                   m.match_number   AS linked_match_number,
+                   m.scheduled_at   AS linked_scheduled_at,
+                   ht.code AS linked_home_code, ht.name AS linked_home_name,
+                   at.code AS linked_away_code, at.name AS linked_away_name
+            FROM bracket b
+            LEFT JOIN matches m ON b.match_id = m.id
+            LEFT JOIN teams ht  ON m.home_team_id = ht.id
+            LEFT JOIN teams at  ON m.away_team_id = at.id
+            ORDER BY
+              CASE b.stage
+                WHEN 'r32'         THEN 0
+                WHEN 'r16'         THEN 1
+                WHEN 'qf'          THEN 2
+                WHEN 'sf'          THEN 3
+                WHEN 'third_place' THEN 4
+                WHEN 'final'       THEN 5
+                ELSE 6 END,
+              b.slot
+        """)
+        # Every knockout match — for populating the dropdowns
+        matches = await db.fetchall("""
+            SELECT m.id, m.stage, m.match_number, m.scheduled_at,
+                   ht.code AS home_code, ht.name AS home_name,
+                   at.code AS away_code, at.name AS away_name
+            FROM matches m
+            LEFT JOIN teams ht ON m.home_team_id = ht.id
+            LEFT JOIN teams at ON m.away_team_id = at.id
+            WHERE m.stage != 'group'
+            ORDER BY m.stage, m.match_number
+        """)
+    return {"slots": slots, "matches": matches}
+
+
+class BracketLinkUpdate(BaseModel):
+    match_id: Optional[int] = None   # null = unlink
+
+
+@router.put("/bracket/{bracket_id}/link")
+async def link_bracket_slot(bracket_id: int, body: BracketLinkUpdate):
+    """Set (or clear) which match row a bracket slot represents.
+
+    Side effects when linking:
+      - If the bracket row already has teams (e.g. R32 with both feeder
+        groups complete), mirrors them into the newly-linked match row.
+      - If the bracket row's seed_desc references a now-final upstream
+        match (e.g. R16 slot whose seed says 'Winner Match 73' and #73
+        is final), runs propagation so the team appears right away.
+    """
+    async with get_db() as db:
+        slot = await db.fetchone(
+            "SELECT id, stage, home_team_id, away_team_id, "
+            "home_seed_desc, away_seed_desc FROM bracket WHERE id = ?",
+            [bracket_id],
+        )
+        if not slot:
+            raise HTTPException(404, "Bracket slot not found")
+        if body.match_id is not None:
+            m = await db.fetchone(
+                "SELECT id, stage FROM matches WHERE id = ?", [body.match_id]
+            )
+            if not m:
+                raise HTTPException(404, "Match not found")
+            if m["stage"] != slot["stage"]:
+                raise HTTPException(
+                    400,
+                    f"Stage mismatch: bracket slot is {slot['stage']}, "
+                    f"match is {m['stage']}",
+                )
+        await db.execute(
+            "UPDATE bracket SET match_id = ? WHERE id = ?",
+            [body.match_id, bracket_id],
+        )
+
+        # If teams are already known on the bracket row, push them to the
+        # freshly-linked match.
+        if body.match_id is not None and (
+            slot["home_team_id"] is not None or slot["away_team_id"] is not None
+        ):
+            await db.execute(
+                "UPDATE matches SET home_team_id = ?, away_team_id = ?, "
+                "updated_at = datetime('now') WHERE id = ?",
+                [slot["home_team_id"], slot["away_team_id"], body.match_id],
+            )
+
+        # Run propagation from any final upstream match this slot references,
+        # in case the linkage was missing when those upstream matches went
+        # final.
+        for side in ("home", "away"):
+            parsed = _parse_match_outcome_seed(slot.get(f"{side}_seed_desc"))
+            if parsed is None:
+                continue
+            num, _outcome = parsed
+            upstream = await db.fetchone(
+                "SELECT id FROM matches WHERE match_number = ? AND status = 'final'",
+                [num],
+            )
+            if upstream:
+                await _propagate_knockout_outcome(db, upstream["id"])
+    return {"ok": True}
 
 
 # Parses "Winner Match 73", "Winner of Match #89", "Loser Match 101", etc.
@@ -405,18 +531,20 @@ async def _mirror_bracket_to_matches(db) -> int:
     return updated
 
 
-async def _link_bracket_to_matches(db) -> int:
-    """For every knockout stage, pair the bracket rows (ordered by slot ASC)
-    with the matches rows (ordered by match_number ASC, scheduled_at as the
-    tie-break) and write bracket.match_id where it's currently NULL.
+async def _link_bracket_to_matches(
+    db,
+    stages: tuple[str, ...] = ("r32", "r16", "qf", "sf", "third_place", "final"),
+) -> int:
+    """For each requested knockout stage, pair the bracket rows (ordered by
+    slot ASC) with the matches rows (ordered by match_number ASC) and write
+    bracket.match_id where it's currently NULL.
 
     Only fills in NULL match_id values — won't disturb any manual links the
     admin has already set. Returns the count of rows newly linked.
 
-    FIFA's bracket numbering convention is that slot 1 of each knockout
-    round corresponds to the lowest-numbered match in that round, slot 2 to
-    the next, and so on, so pairing by stage + sort-order is correct."""
-    stages = ("r32", "r16", "qf", "sf", "third_place", "final")
+    Callers usually restrict to r32 only because FIFA's bracket-slot ↔
+    match-number convention is only reliable for the first knockout round;
+    later rounds need explicit admin mapping via the bracket page."""
     total_linked = 0
     for stage in stages:
         b_rows = await db.fetchall(

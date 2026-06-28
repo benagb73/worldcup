@@ -132,6 +132,12 @@ function MatchPicker({ onSignOut }: { onSignOut: () => void }) {
         <div className="flex items-center gap-2">
           <RefillBracketButton />
           <Link
+            href="/admin/bracket"
+            className="hidden sm:block rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold tracking-widest text-amber-400 hover:bg-amber-500/20"
+          >
+            BRACKET MAP →
+          </Link>
+          <Link
             href="/admin/scoring"
             className="hidden sm:block rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold tracking-widest text-amber-400 hover:bg-amber-500/20"
           >
