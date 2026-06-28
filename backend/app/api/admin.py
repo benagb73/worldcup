@@ -184,6 +184,27 @@ async def refill_bracket():
         # fills, in case the per-group helper is later split out. No-op
         # when the inner loop already wrote them.
         thirds_filled = await _maybe_fill_thirds_from_complete_groups(db)
+        # Backfill knockout propagation for any KO match that finalised
+        # before this propagation feature shipped. Iterate ALL final
+        # knockout matches; each call is idempotent and stage-by-stage
+        # ordering (r32 → r16 → qf → sf) means winners cascade naturally.
+        ko_finals = await db.fetchall("""
+            SELECT m.id FROM matches m
+            WHERE m.group_name IS NULL
+              AND m.status = 'final'
+              AND m.winner_id IS NOT NULL
+            ORDER BY CASE m.stage
+              WHEN 'r32'         THEN 0
+              WHEN 'r16'         THEN 1
+              WHEN 'qf'          THEN 2
+              WHEN 'sf'          THEN 3
+              WHEN 'third_place' THEN 4
+              WHEN 'final'       THEN 5
+              ELSE 6 END, m.match_number
+        """)
+        ko_propagated = 0
+        for r in ko_finals:
+            ko_propagated += await _propagate_knockout_outcome(db, r["id"])
         # Catch-up mirror: copy bracket → matches for any linked row whose
         # match doesn't yet have the same teams. Needed for the case where
         # an earlier refill populated bracket teams BEFORE the linker had
@@ -195,8 +216,96 @@ async def refill_bracket():
         "bracket_links_added": linked,
         "matches_mirrored":    mirrored,
         "thirds_filled":       thirds_filled,
+        "ko_propagated":       ko_propagated,
         "complete_groups":     complete,
     }
+
+
+# Parses "Winner Match 73", "Winner of Match #89", "Loser Match 101", etc.
+# Module-level import here because the group-seed parsers below also use the
+# same `_re` alias (see line ~615 where `import re as _re` lives — but that
+# scope is below us, so we re-import at module top for these helpers).
+import re as _re_outcome
+_MATCH_OUTCOME_RE = _re_outcome.compile(
+    r"^\s*(winner|loser)\s+(?:of\s+)?(?:match\s+)?#?(\d+)\s*$",
+    _re_outcome.I,
+)
+
+
+def _parse_match_outcome_seed(desc: Optional[str]) -> Optional[tuple[int, str]]:
+    """For descriptors like 'Winner Match 73' return (73, 'winner'); for
+    'Loser Match 101' return (101, 'loser'); else None."""
+    if not desc:
+        return None
+    m = _MATCH_OUTCOME_RE.match(desc)
+    if not m:
+        return None
+    return (int(m.group(2)), m.group(1).lower())
+
+
+async def _propagate_knockout_outcome(db, match_id: int) -> int:
+    """When this knockout match has a winner_id set, find any bracket slot
+    whose home_seed_desc / away_seed_desc references this match's number
+    (e.g. 'Winner Match 73') and write the team into it. Mirrors the same
+    team into the linked downstream match row so the picks form and public
+    match page see it immediately. Returns count of bracket sides updated.
+
+    Safe to call on any match — no-op for matches that aren't final or
+    that aren't referenced by any downstream bracket descriptor.
+    """
+    m = await db.fetchone(
+        "SELECT match_number, status, winner_id, home_team_id, away_team_id "
+        "FROM matches WHERE id = ?",
+        [match_id],
+    )
+    if not m or m["status"] != "final" or m["winner_id"] is None:
+        return 0
+    if m["match_number"] is None:
+        return 0
+    # The "loser" half of the pair is the other team. Only meaningful when
+    # both team ids are set (otherwise we can't identify the loser).
+    winner_id = m["winner_id"]
+    loser_id  = m["away_team_id"] if winner_id == m["home_team_id"] else m["home_team_id"]
+
+    target_num = m["match_number"]
+    slots = await db.fetchall(
+        "SELECT id, match_id, home_team_id, away_team_id, "
+        "home_seed_desc, away_seed_desc FROM bracket"
+    )
+    updated = 0
+    for s in slots:
+        new_home = s["home_team_id"]
+        new_away = s["away_team_id"]
+        for side in ("home", "away"):
+            parsed = _parse_match_outcome_seed(s.get(f"{side}_seed_desc"))
+            if parsed is None:
+                continue
+            num, outcome = parsed
+            if num != target_num:
+                continue
+            # Skip when we can't identify the loser (would write NULL)
+            tid = winner_id if outcome == "winner" else loser_id
+            if tid is None:
+                continue
+            if side == "home":
+                new_home = tid
+            else:
+                new_away = tid
+
+        if new_home == s["home_team_id"] and new_away == s["away_team_id"]:
+            continue
+        await db.execute(
+            "UPDATE bracket SET home_team_id = ?, away_team_id = ? WHERE id = ?",
+            [new_home, new_away, s["id"]],
+        )
+        if s["match_id"] is not None:
+            await db.execute(
+                "UPDATE matches SET home_team_id = ?, away_team_id = ?, "
+                "updated_at = datetime('now') WHERE id = ?",
+                [new_home, new_away, s["match_id"]],
+            )
+        updated += 1
+    return updated
 
 
 async def _maybe_fill_thirds_from_complete_groups(db) -> int:
@@ -421,6 +530,14 @@ async def update_match(match_id: int, body: MatchUpdate):
             # When all of this group's matches are final, push the winner +
             # runner-up into any bracket slots that reference them.
             await _maybe_fill_bracket_from_group(db, match["group_name"])
+
+        # Knockout match just finished → push winner (and loser, for the
+        # third-place playoff) into any downstream bracket slot whose
+        # seed_desc reads "Winner Match N" / "Loser Match N".
+        if (merged["status"] == "final"
+                and (match.get("group_name") is None)
+                and winner_id is not None):
+            await _propagate_knockout_outcome(db, match_id)
 
         # Score any family-competition picks attached to this match
         from app.api.compete import recompute_match_points
