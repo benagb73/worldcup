@@ -156,8 +156,10 @@ function Editor({ matchId }: { matchId: number }) {
         </div>
       </div>
 
-      {/* Knockout: pick teams when not yet known */}
-      {(match.home_id == null || match.away_id == null) && (
+      {/* Knockout matches: always show the team picker so admin can
+          set/override home and away as winners are decided. Group-stage
+          matches don't need this — their teams are seeded up front. */}
+      {match.stage !== 'group' && (
         <TeamPickerPanel match={match} onSaved={refresh} />
       )}
 
@@ -934,12 +936,19 @@ function TeamPickerPanel({ match, onSaved }: {
     }
   }
 
+  // Distinguish "no teams set yet" vs "teams set, can be overridden"
+  const teamsSet = match.home_id != null && match.away_id != null
+
   return (
     <section className="rounded-2xl border border-amber-400/30 bg-amber-500/[0.04] p-6">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">KNOCKOUT PLACEHOLDER</div>
-          <h2 className="font-display text-2xl tracking-wide text-cream">Set Teams</h2>
+          <div className="text-[10px] font-bold tracking-[0.3em] text-amber-400">
+            {teamsSet ? 'KNOCKOUT MATCHUP' : 'KNOCKOUT PLACEHOLDER'}
+          </div>
+          <h2 className="font-display text-2xl tracking-wide text-cream">
+            {teamsSet ? 'Override Teams' : 'Set Teams'}
+          </h2>
           <p className="mt-1 text-xs text-cream/60">
             Once the previous round finishes, set the winners here. After saving,
             event and lineup panels will appear.

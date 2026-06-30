@@ -130,7 +130,9 @@ async def whoami():
 
 @router.put("/matches/{match_id}/teams")
 async def set_match_teams(match_id: int, body: MatchTeams):
-    """Wire actual teams into a knockout placeholder match once winners are known."""
+    """Wire actual teams into a knockout placeholder match once winners are
+    known. Mirrors the same teams into the bracket row linked to this match
+    so the public bracket tree picks them up too."""
     async with get_db() as db:
         m = await db.fetchone("SELECT id, stage FROM matches WHERE id = ?", [match_id])
         if not m:
@@ -138,6 +140,14 @@ async def set_match_teams(match_id: int, body: MatchTeams):
         await db.execute(
             "UPDATE matches SET home_team_id = ?, away_team_id = ?, updated_at = datetime('now') "
             "WHERE id = ?",
+            [body.home_team_id, body.away_team_id, match_id]
+        )
+        # Mirror to the linked bracket row, if there is one. Picks the
+        # single row that references this match — bracket.match_id is the
+        # FK from bracket to matches.
+        await db.execute(
+            "UPDATE bracket SET home_team_id = ?, away_team_id = ? "
+            "WHERE match_id = ?",
             [body.home_team_id, body.away_team_id, match_id]
         )
     return {"ok": True}
@@ -412,6 +422,12 @@ async def _propagate_knockout_outcome(db, match_id: int) -> int:
             # Skip when we can't identify the loser (would write NULL)
             tid = winner_id if outcome == "winner" else loser_id
             if tid is None:
+                continue
+            # PRESERVE manual overrides: only fill in this side if it's
+            # currently empty. If admin already picked a specific team via
+            # /matches/{id}/teams (or directly in SQL), don't clobber it.
+            current = s["home_team_id"] if side == "home" else s["away_team_id"]
+            if current is not None:
                 continue
             if side == "home":
                 new_home = tid
@@ -1074,6 +1090,16 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
         actual = [m for m in candidates if m is not None]
         return min(actual) if actual else None
 
+    # If extra time was played, cap minutes at 120 instead of 90. Detected
+    # by either et_home or et_away being filled in.
+    match_row = await db.fetchone(
+        "SELECT et_home, et_away FROM matches WHERE id = ?", [match_id]
+    )
+    et_played = bool(match_row and (
+        match_row.get("et_home") is not None or match_row.get("et_away") is not None
+    ))
+    full_match = 120 if et_played else 90
+
     for lp in lineup:
         pid       = lp["player_id"]
         is_start  = bool(lp["is_starter"])
@@ -1082,9 +1108,9 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
 
         # Minutes played heuristic — user can override later via stats form
         if is_start:
-            mins = exit_min if exit_min is not None else 90
+            mins = exit_min if exit_min is not None else full_match
         elif sub_on is not None:
-            mins = max(0, (exit_min if exit_min is not None else 90) - sub_on)
+            mins = max(0, (exit_min if exit_min is not None else full_match) - sub_on)
         else:
             mins = 0  # named in squad but didn't come on
 
