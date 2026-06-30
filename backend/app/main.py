@@ -680,11 +680,14 @@ async def get_match(match_id: int):
             side_stats = [s for s in stat_rows if s["team_id"] == side_id]
             pa  = sum(s["passes_attempted"] or 0 for s in side_stats)
             pc  = sum(s["passes_completed"] or 0 for s in side_stats)
-            # Goals via events: own goals credit the opposite team
+            # Goals via events: own goals credit the opposite team. Shootout
+            # kicks (period='penalties') are excluded — they decide the match
+            # but don't add to either team's in-play goal tally.
             other_id = row["away_id"] if side_id == row.get("home_id") else row["home_id"]
             goals = sum(
                 1 for e in event_rows
                 if e["event_type"] == "goal"
+                and e["period"] != "penalties"
                 and (
                     (e["team_id"] == side_id and not e["is_own_goal"])
                     or (e["team_id"] == other_id and e["is_own_goal"])

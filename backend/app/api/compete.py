@@ -165,6 +165,7 @@ async def _first_goal_event(db, match_id: int) -> Optional[dict]:
     row = await db.fetchone("""
         SELECT player_id, event_type, is_own_goal FROM match_events
         WHERE match_id = ? AND event_type IN ('goal', 'own_goal')
+          AND period != 'penalties'
         ORDER BY
           CASE period
             WHEN 'normal'        THEN 0

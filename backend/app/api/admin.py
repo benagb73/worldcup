@@ -1054,7 +1054,7 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
         [match_id]
     )
     events = await db.fetchall(
-        "SELECT player_id, team_id, event_type, minute, is_own_goal "
+        "SELECT player_id, team_id, event_type, minute, is_own_goal, period "
         "FROM match_events WHERE match_id = ?",
         [match_id]
     )
@@ -1117,10 +1117,13 @@ async def _recompute_derived_stats(db, match_id: int) -> None:
         # Own goals do NOT credit the scorer's goal tally — they're stored on
         # the defender's row with is_own_goal=1, but only count toward the
         # opposing team's score, never the player's stats.
+        # Shootout penalties (period='penalties') also don't count — they
+        # decide the match but aren't part of a player's career goal tally.
         goals    = sum(1 for e in events
                        if e["player_id"] == pid
                        and e["event_type"] == "goal"
-                       and not e["is_own_goal"])
+                       and not e["is_own_goal"]
+                       and e["period"] != "penalties")
         assists  = evcount(pid, {"assist"})
         yellow   = evcount(pid, {"yellow_card", "yellow_red_card"})
         red      = evcount(pid, {"red_card", "yellow_red_card"})
