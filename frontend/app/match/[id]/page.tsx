@@ -71,7 +71,7 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
       {tab === 'timeline' && hasTimeline && (
         <section>
           <SectionHeading eyebrow="MINUTE BY MINUTE" title="Match Timeline" />
-          <Timeline events={events} homeId={homeId} awayId={awayId} homeTeam={match.home_team!} awayTeam={match.away_team!} />
+          <Timeline match={match} events={events} homeId={homeId} awayId={awayId} homeTeam={match.home_team!} awayTeam={match.away_team!} />
         </section>
       )}
 
@@ -468,10 +468,43 @@ function SubIcon() {
   )
 }
 
-function Timeline({ events, homeId, awayId, homeTeam, awayTeam }: {
-  events: MatchEvent[]; homeId: number; awayId: number; homeTeam: Team; awayTeam: Team
+// Match segments (1st half, 2nd half, ET1, ET2, pens) and the milestone
+// that *precedes* each one (i.e. is shown just before the first event of
+// that segment). 1st-half has no preceding milestone other than START
+// which is always rendered at the top.
+type Segment = '1st_half' | '2nd_half' | 'et_1' | 'et_2' | 'pens'
+
+function eventSegment(e: MatchEvent): Segment {
+  if (e.period === 'normal')        return e.minute <= 45 ? '1st_half' : '2nd_half'
+  if (e.period === 'extra_time_1')  return 'et_1'
+  if (e.period === 'extra_time_2')  return 'et_2'
+  if (e.period === 'penalties')     return 'pens'
+  return '1st_half'
+}
+
+// Label that introduces each segment (shown before its first event)
+const SEGMENT_OPENER: Record<Segment, string | null> = {
+  '1st_half': null,                  // START is rendered separately
+  '2nd_half': 'HALF TIME',
+  'et_1':     'FULL TIME',
+  'et_2':     'HALF TIME (ET)',
+  'pens':     'FULL TIME (ET)',
+}
+
+// Milestones that come AFTER a given segment, in order. Used to add
+// trailing dividers based on the match's actual state.
+const SEGMENT_FOLLOWERS: Record<Segment, string[]> = {
+  '1st_half': ['HALF TIME', 'FULL TIME', 'HALF TIME (ET)', 'FULL TIME (ET)', 'END OF PENALTIES'],
+  '2nd_half': ['FULL TIME', 'HALF TIME (ET)', 'FULL TIME (ET)', 'END OF PENALTIES'],
+  'et_1':     ['HALF TIME (ET)', 'FULL TIME (ET)', 'END OF PENALTIES'],
+  'et_2':     ['FULL TIME (ET)', 'END OF PENALTIES'],
+  'pens':     ['END OF PENALTIES'],
+}
+
+function Timeline({ match, events, homeId, awayId, homeTeam, awayTeam }: {
+  match: MatchDetail['match']; events: MatchEvent[]; homeId: number; awayId: number; homeTeam: Team; awayTeam: Team
 }) {
-  // Sort by minute + period
+  // Sort by period + minute
   const periodOrder = { normal: 0, extra_time_1: 1, extra_time_2: 2, penalties: 3 } as Record<string, number>
   const sorted = [...events]
     .filter(e => !['assist', 'substitution_on'].includes(e.event_type))
@@ -480,6 +513,66 @@ function Timeline({ events, homeId, awayId, homeTeam, awayTeam }: {
       if (po) return po
       return (a.minute - b.minute) || (a.added_time - b.added_time)
     })
+
+  // Match-state signals — used to decide which trailing milestones to add
+  const isFinal   = match.status === 'final'
+  const liveET    = match.status.startsWith('live_et')
+  const livePens  = match.status === 'live_penalties'
+  const etPlayed  = match.score.et_home != null || match.score.et_away != null
+  const penPlayed = match.score.pen_home != null || match.score.pen_away != null
+
+  // Which trailing milestones have actually been reached
+  const reached: Record<string, boolean> = {
+    'HALF TIME':        sorted.some(e => e.period !== 'normal')
+                          || sorted.some(e => e.period === 'normal' && e.minute > 45)
+                          || isFinal || liveET || livePens
+                          || match.score.ht_home != null,
+    'FULL TIME':        etPlayed || penPlayed || isFinal || liveET || livePens
+                          || sorted.some(e => e.period !== 'normal'),
+    'HALF TIME (ET)':   penPlayed || livePens
+                          || sorted.some(e => e.period === 'extra_time_2' || e.period === 'penalties')
+                          || (etPlayed && isFinal),
+    'FULL TIME (ET)':   penPlayed || livePens
+                          || sorted.some(e => e.period === 'penalties')
+                          || (etPlayed && isFinal),
+    'END OF PENALTIES': penPlayed && isFinal,
+  }
+
+  // Interleave events with segment-opening milestones, then append the
+  // trailing milestones that come after the last segment we saw.
+  type Item =
+    | { kind: 'milestone'; label: string }
+    | { kind: 'event';     event: MatchEvent }
+
+  const items: Item[] = [{ kind: 'milestone', label: 'START' }]
+  let currentSeg: Segment | null = null
+  for (const e of sorted) {
+    const seg = eventSegment(e)
+    if (seg !== currentSeg) {
+      const opener = SEGMENT_OPENER[seg]
+      if (opener) items.push({ kind: 'milestone', label: opener })
+      currentSeg = seg
+    }
+    items.push({ kind: 'event', event: e })
+  }
+  // Trailing milestones: anything reached past the last segment we saw
+  const followers = currentSeg ? SEGMENT_FOLLOWERS[currentSeg]
+                               : ['HALF TIME', 'FULL TIME', 'HALF TIME (ET)', 'FULL TIME (ET)', 'END OF PENALTIES']
+  for (const lbl of followers) {
+    if (reached[lbl]) items.push({ kind: 'milestone', label: lbl })
+  }
+
+  // Append "(Final)" to whichever milestone is the actual end-of-game one
+  // (i.e., the *last* milestone shown), as long as the match has ended.
+  if (isFinal) {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind === 'milestone' && it.label !== 'START') {
+        it.label = `${it.label} (Final)`
+        break
+      }
+    }
+  }
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/10 panel">
@@ -501,16 +594,43 @@ function Timeline({ events, homeId, awayId, homeTeam, awayTeam }: {
         <div className="pointer-events-none absolute left-1/2 top-0 bottom-0 -ml-px w-px bg-gradient-to-b from-transparent via-white/15 to-transparent" />
 
         <div className="space-y-3">
-          {sorted.map(e => (
-            <TimelineRow
-              key={e.id}
-              event={e}
-              isHome={e.team_id === homeId}
-              allEvents={events}
-            />
-          ))}
+          {items.map((it, idx) =>
+            it.kind === 'milestone'
+              ? <TimelineMilestone key={`m-${idx}-${it.label}`} label={it.label} />
+              : <TimelineRow
+                  key={it.event.id}
+                  event={it.event}
+                  isHome={it.event.team_id === homeId}
+                  allEvents={events}
+                />
+          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function TimelineMilestone({ label }: { label: string }) {
+  // Final marker gets a slightly hotter amber styling so it stands out
+  const isFinal = label.includes('(Final)')
+  return (
+    <div className="relative flex items-center gap-3 py-2">
+      <div className={clsx(
+        'flex-1 h-px',
+        isFinal ? 'bg-amber-400/40' : 'bg-white/15'
+      )} />
+      <span className={clsx(
+        'rounded-full px-3 py-1 text-[10px] font-bold tracking-widest',
+        isFinal
+          ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-400/40'
+          : 'bg-white/[0.04] text-cream/55 ring-1 ring-white/10'
+      )}>
+        {label}
+      </span>
+      <div className={clsx(
+        'flex-1 h-px',
+        isFinal ? 'bg-amber-400/40' : 'bg-white/15'
+      )} />
     </div>
   )
 }
