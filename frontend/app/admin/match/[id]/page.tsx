@@ -520,6 +520,10 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
     setBusy(true)
     setErr(null)
     try {
+      // Shootout kicks: minute/added are meaningless (order is by insertion
+      // id within period='penalties'), and every kick IS a penalty so
+      // is_penalty is true regardless of whatever the UI state says.
+      const isShootout = period === 'penalties'
       await adminFetch(`/matches/${match.id}/events`, {
         method: 'POST',
         body: JSON.stringify({
@@ -529,10 +533,10 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
           team_id: playerTeamId,
           player_id: Number(playerId),
           event_type: type,
-          minute,
-          added_time: added,
+          minute: isShootout ? 0 : minute,
+          added_time: isShootout ? 0 : added,
           period,
-          is_penalty: penalty,
+          is_penalty: isShootout ? true : penalty,
           is_own_goal: own,
           // Only send assist_player_id for real goals (not own goals / pens-missed)
           assist_player_id:
@@ -592,24 +596,40 @@ function EventForm({ match, homeRoster, awayRoster, onSaved }: {
           </select>
         </Field>
 
-        <Field label="Minute">
-          <input type="number" min={0} max={130} value={minute}
-                 onChange={e => setMinute(Number(e.target.value))}
-                 onFocus={e => e.target.select()}
-                 className="adm-input" />
-        </Field>
-        <Field label="+ Added">
-          <input type="number" min={0} max={20} value={added}
-                 onChange={e => setAdded(Number(e.target.value))}
-                 onFocus={e => e.target.select()}
-                 className="adm-input" />
-        </Field>
+        {/* Shootout kicks don't need a minute — order is preserved by
+            insertion (id ASC within period='penalties'). Hide the minute
+            inputs to avoid clutter and accidental wrong entries. */}
+        {period !== 'penalties' && (
+          <>
+            <Field label="Minute">
+              <input type="number" min={0} max={130} value={minute}
+                     onChange={e => setMinute(Number(e.target.value))}
+                     onFocus={e => e.target.select()}
+                     className="adm-input" />
+            </Field>
+            <Field label="+ Added">
+              <input type="number" min={0} max={20} value={added}
+                     onChange={e => setAdded(Number(e.target.value))}
+                     onFocus={e => e.target.select()}
+                     className="adm-input" />
+            </Field>
+          </>
+        )}
+        {period === 'penalties' && (
+          <div className="self-end col-span-2 sm:col-span-1 rounded-lg border border-amber-400/20 bg-amber-500/[0.04] px-3 py-2 text-[11px] text-amber-300/80">
+            Shootout kick — order is taken from entry order, no minute needed.
+          </div>
+        )}
         {isGoalish && (
           <div className="flex items-center gap-4 self-end">
-            <label className="flex items-center gap-2 text-xs text-cream/70">
-              <input type="checkbox" checked={penalty} onChange={e => setPenalty(e.target.checked)} className="accent-amber-400" />
-              Penalty
-            </label>
+            {/* The "Penalty" checkbox is meaningless in a shootout (every kick
+                is a penalty); auto-check it and don't show the toggle. */}
+            {period !== 'penalties' && (
+              <label className="flex items-center gap-2 text-xs text-cream/70">
+                <input type="checkbox" checked={penalty} onChange={e => setPenalty(e.target.checked)} className="accent-amber-400" />
+                Penalty
+              </label>
+            )}
             <label className="flex items-center gap-2 text-xs text-cream/70">
               <input type="checkbox" checked={own} onChange={e => setOwn(e.target.checked)} className="accent-amber-400" />
               Own goal

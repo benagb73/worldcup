@@ -962,42 +962,67 @@ async def delete_event(event_id: int):
 async def _recompute_score_from_events(db, match_id: int) -> None:
     """Sync match.ft_home / match.ft_away with the goal events on this match.
 
-    Counts:
+    Counts in-play goals (period != 'penalties') as:
       home_goals = (regular goals by home team) + (own goals by away team)
       away_goals = (regular goals by away team) + (own goals by home team)
 
-    Called whenever a goal event is added or deleted so the public live score
-    updates automatically. Admin can still manually override via the score
-    panel, but the next goal event will re-sync.
+    Shootout kicks (period = 'penalties') are EXCLUDED from ft/et and instead
+    tally pen_home / pen_away. So entering a shootout converted-penalty no
+    longer accidentally inflates the in-play scoreline.
+
+    If no shootout events exist, the existing manual pen_home / pen_away
+    values are left alone so the admin Score panel can override them.
+
+    Called whenever a goal event is added or deleted.
     """
     m = await db.fetchone(
-        "SELECT home_team_id, away_team_id FROM matches WHERE id = ?", [match_id]
+        "SELECT home_team_id, away_team_id, pen_home, pen_away "
+        "FROM matches WHERE id = ?", [match_id]
     )
     if not m or m["home_team_id"] is None or m["away_team_id"] is None:
         return
 
     events = await db.fetchall(
-        "SELECT team_id, event_type, is_own_goal FROM match_events "
+        "SELECT team_id, event_type, is_own_goal, period FROM match_events "
         "WHERE match_id = ? AND event_type IN ('goal', 'own_goal')",
         [match_id]
     )
-    home, away = 0, 0
+    home, away, pen_h, pen_a = 0, 0, 0, 0
+    shootout_events_seen = False
     for e in events:
         # own_goal flag (or 'own_goal' type) credits the OPPOSING team
         is_own = e["event_type"] == "own_goal" or bool(e["is_own_goal"])
         scoring_team = m["away_team_id"] if (is_own and e["team_id"] == m["home_team_id"]) \
                         else m["home_team_id"] if (is_own and e["team_id"] == m["away_team_id"]) \
                         else e["team_id"]
-        if scoring_team == m["home_team_id"]:
-            home += 1
-        elif scoring_team == m["away_team_id"]:
-            away += 1
+        if e["period"] == "penalties":
+            shootout_events_seen = True
+            if scoring_team == m["home_team_id"]:
+                pen_h += 1
+            elif scoring_team == m["away_team_id"]:
+                pen_a += 1
+        else:
+            if scoring_team == m["home_team_id"]:
+                home += 1
+            elif scoring_team == m["away_team_id"]:
+                away += 1
 
-    await db.execute(
-        "UPDATE matches SET ft_home = ?, ft_away = ?, updated_at = datetime('now') "
-        "WHERE id = ?",
-        [home, away, match_id]
-    )
+    # Only overwrite pen_home / pen_away if shootout events exist — preserves
+    # manual entries set via the admin Score panel when nobody's recording
+    # shootout kicks as events.
+    if shootout_events_seen:
+        await db.execute(
+            "UPDATE matches SET ft_home = ?, ft_away = ?, "
+            "pen_home = ?, pen_away = ?, updated_at = datetime('now') "
+            "WHERE id = ?",
+            [home, away, pen_h, pen_a, match_id]
+        )
+    else:
+        await db.execute(
+            "UPDATE matches SET ft_home = ?, ft_away = ?, "
+            "updated_at = datetime('now') WHERE id = ?",
+            [home, away, match_id]
+        )
 
 
 async def _recompute_derived_stats(db, match_id: int) -> None:
